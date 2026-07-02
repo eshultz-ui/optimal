@@ -391,7 +391,7 @@
       <div class="sec">
         <h2>Operation</h2>
         <label class="fld"><span>Days worked / week</span><input id="daysWeek" class="inp mono" type="number" step="0.1" min="1" max="7" value="5" /></label>
-        <div class="hint">One consistent optimization: jobs are split into compact territories near the depot (every crew used) and total driving is minimized. Each crew commutes to its territory every working day, so a closer depot cuts the daily commute — which is why the two-branch split comes out cheaper than one spread-out branch. The model is fit to your real books: the all-branch route = <b>$994,000/year</b> ($19,115/week; $3,823/day at 5 days/week). Every run uses the same fit, so branches are directly comparable.</div>
+        <div class="hint">One consistent optimization: jobs split into compact territories near the depot (every crew used), total driving minimized. Crews <b>don't do all jobs in one day</b> — each crew works ~1/5 of its (nearby) jobs per day and returns to base, so a closer depot cuts the daily commute. That's why the two-branch split runs ~15-20% cheaper than one branch. Fit to your books: the all-branch route = <b>$3,607/day</b> ($937k/yr at 5 days/week); the same fit applies to every run so branches are comparable.</div>
       </div>
 
       <!-- Actions -->
@@ -904,24 +904,26 @@ function buildPlan(routesIdx, dist, dur, P){
     totMi+=mi; totHr+=hr; totBuf+=rttBuf; totDriveHr+=driveHr; totFuelMi+=fuelMi; maxHr=Math.max(maxHr,hr);
     return { seq, miles:mi, hours:hr, driveHours:driveHr, backMiles:backMi, backHours:backHr, buffer:rttBuf, fuelMiles:fuelMi, legs:legList(r, dist) };
   });
-  // ---- Weekly travel with DAILY DEPOT RETURNS (commute-based) ----
-  // Each crew: (a) commutes to its territory & back every working day [depends on depot],
-  // (b) drives site-to-site once across the week [same regardless of depot], and
-  // (c) a fixed per-crew daily overhead — equipment/supply runs, non-route driving —
-  // that doesn't depend on depot location and dilutes the pure-commute swing.
-  const BASE_HR_PER_DAY = 0.76;                 // depot-independent driving, hr/crew/day
+  // ---- Weekly travel: crews DON'T do all jobs in one day ----
+  // Each crew's optimized route is split into D compact daily segments (~1/N of the
+  // jobs per day, kept close together by the route order). Each day the crew commutes
+  // out to that day's cluster and back, then a fixed per-crew overhead (equipment /
+  // supply runs) that doesn't depend on depot location.
+  const BASE_HR_PER_DAY = 0.62;
   let wkDriveHr=0, wkDriveMi=0, wkFuelMi=0;
   for(const r of routesIdx){
     if(!r.length) continue;
-    let depHr=0, depMi=0;
-    for(const node of r){ depHr+=dur[0][node]*S2HR; depMi+=dist[0][node]*M2MI; }
-    const avgDepHr=depHr/r.length, avgDepMi=depMi/r.length;   // one-way to territory
-    let intraHr=0, intraMi=0;
-    for(let k=0;k<r.length-1;k++){ intraHr+=dur[r[k]][r[k+1]]*S2HR; intraMi+=dist[r[k]][r[k+1]]*M2MI; }
-    const baseHr=BASE_HR_PER_DAY*D, baseMi=baseHr*(AVG_MPH);
-    wkDriveHr += D*2*avgDepHr + intraHr + baseHr;             // commute×days + intra + overhead
-    wkDriveMi += D*2*avgDepMi + intraMi + baseMi;
-    wkFuelMi  += D*2*avgDepMi + intraMi + baseMi;
+    const L=r.length;
+    for(let d=0; d<D; d++){
+      const a=Math.floor(d*L/D), b=Math.floor((d+1)*L/D);
+      const seg=r.slice(a,b);
+      if(!seg.length) continue;                 // no jobs that day → no trip
+      let p=0;
+      for(const node of seg){ const lm=dist[p][node]*M2MI; wkDriveMi+=lm; wkDriveHr+=dur[p][node]*S2HR; wkFuelMi+=lm; p=node; }
+      const bm=dist[p][0]*M2MI; wkDriveMi+=bm; wkDriveHr+=dur[p][0]*S2HR; wkFuelMi+=bm;  // home each day
+    }
+    const baseHr=BASE_HR_PER_DAY*D, baseMi=baseHr*AVG_MPH;   // depot-independent overhead
+    wkDriveHr+=baseHr; wkDriveMi+=baseMi; wkFuelMi+=baseMi;
   }
   const labor=totHr*rate*people, gas=(totFuelMi/mpg)*gasPrice, total=labor+gas;
   return { routes, totMi, totHr, maxHr, totBuf, totDriveHr, totFuelMi, labor, gas, total, people,
@@ -1060,7 +1062,7 @@ function renderResult(){
   // route = $3,607/day labor; same factor applies to every run for comparable numbers.
   const daysWeek = Math.max(1, +$('daysWeek').value||5);
   const WEEKS=52;
-  const factor = 0.4851;   // baked calibration: no-split all-branch (both territories from Milpitas) = $994,000/yr
+  const factor = 0.5402;   // baked: no-split all-branch (both territories from Milpitas) = $3,607/day
   const wkDriveHr=R.wkDriveHr||R.totHr, wkDriveMi=R.wkDriveMi||R.totMi, wkFuelMi=R.wkFuelMi||R.totFuelMi;
 
   const wkHrs=wkDriveHr*factor,          dayHrs=wkHrs/daysWeek,   yrHrs=wkHrs*WEEKS;
