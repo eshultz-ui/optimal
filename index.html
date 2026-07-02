@@ -387,13 +387,6 @@
         <div class="hint">Labor = crew travel time × rate × crew size (everyone is paid for travel). Crew size can be a decimal average (e.g. 2.68). Gas = miles ÷ MPG × price/gallon, per vehicle.</div>
       </div>
 
-      <!-- Operating schedule -->
-      <div class="sec">
-        <h2>Operation</h2>
-        <label class="fld"><span>Days worked / week</span><input id="daysWeek" class="inp mono" type="number" step="0.1" min="1" max="7" value="5" /></label>
-        <div class="hint">One consistent optimization: jobs split into compact territories near the depot (every crew used), total driving minimized. Crews <b>don't do all jobs in one day</b> — each crew works ~1/5 of its (nearby) jobs per day and returns to base, so a closer depot cuts the daily commute. That's why the two-branch split runs ~15-20% cheaper than one branch. Fit to your books: the all-branch route = <b>$3,607/day</b> ($937k/yr at 5 days/week); the same fit applies to every run so branches are comparable.</div>
-      </div>
-
       <!-- Actions -->
       <div class="sec" style="border-bottom:0">
         <div id="frameBanner" class="banner" style="display:none">
@@ -939,7 +932,7 @@ async function optimize(){
   const rate=+$('rate').value||0, gasPrice=+$('gas').value||0, mpg=+$('mpg').value||1;
   const people=Math.max(0.1, parseFloat($('people').value)||1);
   const rttBuf = Math.max(0, +$('rttbuf').value||0)/60;
-  const daysWeekV = Math.max(1, +$('daysWeek').value||5);
+  const daysWeekV = 5;   // fixed 5-day work week
 
   // Territories: a preset can lock crews to branch territories (e.g. all-branch = old-area
   // + new-area, each served separately from the depot). Without that, one free territory.
@@ -1060,9 +1053,9 @@ function renderResult(){
   // Each crew commutes to its territory every working day; a closer depot cuts that
   // commute, which is where a branch split pays off. Factor calibrated so the all-branch
   // route = $3,607/day labor; same factor applies to every run for comparable numbers.
-  const daysWeek = Math.max(1, +$('daysWeek').value||5);
+  const daysWeek = 5;   // fixed 5-day work week
   const WEEKS=52;
-  const factor = 0.5402;   // baked: no-split all-branch (both territories from Milpitas) = $3,607/day
+  const factor = 0.5726;   // baked: no-split all-branch labor = ~$994,000/yr (both territories from Milpitas)
   const wkDriveHr=R.wkDriveHr||R.totHr, wkDriveMi=R.wkDriveMi||R.totMi, wkFuelMi=R.wkFuelMi||R.totFuelMi;
 
   const wkHrs=wkDriveHr*factor,          dayHrs=wkHrs/daysWeek,   yrHrs=wkHrs*WEEKS;
@@ -1207,7 +1200,7 @@ $('compare').onclick=compareCrews;
 $('compareClose').onclick=()=>$('compareModal').classList.remove('show');
 $('compareModal').addEventListener('click',e=>{ if(e.target===$('compareModal')) $('compareModal').classList.remove('show'); });
 $('clear').onclick=()=>{ state.base=null; state.jobs=[]; state.groups=null; clearResult(); renderPoints(); drawMarkers(); };
-['rate','gas','mpg','rttbuf','people','daysWeek'].forEach(id=>$(id).addEventListener('change',()=>{ if(state.result){ recost(); } }));
+['rate','gas','mpg','rttbuf','people'].forEach(id=>$(id).addEventListener('change',()=>{ if(state.result){ recost(); } }));
 
 function recost(){ // recompute cost + round-trip buffer + headcount without re-routing
   const R=state.result; const rate=+$('rate').value||0, gasPrice=+$('gas').value||0, mpg=+$('mpg').value||1;
