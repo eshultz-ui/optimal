@@ -402,10 +402,11 @@
       <div class="sec">
         <h2>Operation</h2>
         <div class="row">
+          <label class="fld grow"><span>Days worked / week</span><input id="daysWeek" class="inp mono" type="number" step="1" min="1" max="7" value="5" /></label>
           <label class="fld grow"><span>Working days / year</span><input id="daysYear" class="inp mono" type="number" step="1" min="1" max="366" value="250" /></label>
-          <label class="fld grow"><span>Real-world factor ×</span><input id="rwFactor" class="inp mono" type="number" step="0.05" min="1" value="4.15" /></label>
         </div>
-        <div class="hint">The optimizer computes <b>ideal</b> routing (one efficient weekly pass of every site). Real crews drive several times that — traffic, daily depot returns, fixed territories, repeat visits. The <b>real-world factor</b> scales the ideal up to your actual recorded hours; tune it until the per-year <b>Labor</b> matches your books. Labor = drive time × rate × crew size; gas is separate. Annual = weekly × 52; daily = annual ÷ working days/year.</div>
+        <label class="fld"><span>Real-world factor ×</span><input id="rwFactor" class="inp mono" type="number" step="0.01" min="0.1" value="1.416" /></label>
+        <div class="hint">Models <b>daily depot returns</b> — each crew's route is split across the work week, returning to base every day, so the commute is counted per day (not once). This is where a closer branch pays off. The <b>real-world factor</b> (residual traffic / non-optimal driving) is calibrated so the all-branch route = <b>$994,000/yr</b> labor, and the same factor applies to every run for comparable numbers. Annual = weekly × 52; daily = annual ÷ working days/year.</div>
       </div>
 
       <!-- Actions -->
@@ -448,12 +449,12 @@
     </div>
 
     <div class="readout idle" id="readout">
-      <div class="metric accent"><div class="k">Total miles</div><div class="v" id="mTotMiles">—</div></div>
-      <div class="metric"><div class="k">Total crew time</div><div class="v" id="mTotTime">—</div></div>
-      <div class="metric"><div class="k">Finish (parallel)</div><div class="v" id="mFinish">—</div></div>
-      <div class="metric"><div class="k">Travel labor</div><div class="v" id="mLabor">—</div></div>
-      <div class="metric"><div class="k">Gas</div><div class="v" id="mGas">—</div></div>
-      <div class="metric total"><div class="k">Total cost</div><div class="v" id="mTotal">—</div></div>
+      <div class="metric accent"><div class="k">Miles / day</div><div class="v" id="mTotMiles">—</div></div>
+      <div class="metric"><div class="k">Crew hrs / day</div><div class="v" id="mTotTime">—</div></div>
+      <div class="metric"><div class="k">Route finish</div><div class="v" id="mFinish">—</div></div>
+      <div class="metric"><div class="k">Labor / day</div><div class="v" id="mLabor">—</div></div>
+      <div class="metric"><div class="k">Gas / day</div><div class="v" id="mGas">—</div></div>
+      <div class="metric total"><div class="k">Total / day</div><div class="v" id="mTotal">—</div></div>
     </div>
 
     <div class="toast" id="toast"><span class="spin"></span><span id="toastMsg">Working…</span></div>
@@ -904,6 +905,7 @@ function legList(r, dist){ const out=[]; let prev=0; for(const node of r){ out.p
 function buildPlan(routesIdx, dist, dur, P){
   const {depF, retF, rttBuf, rate, gasPrice, mpg}=P;
   const people=Math.max(1, P.people||1);
+  const D=Math.max(1, Math.round(P.daysWeek||5)); // depot returns per week
   let totMi=0, totHr=0, maxHr=0, totBuf=0, totDriveHr=0, totFuelMi=0;
   const routes = routesIdx.filter(r=>r.length).map((r)=>{
     let mi=0,driveHr=0,fuelMi=0,prev=0;
@@ -918,8 +920,22 @@ function buildPlan(routesIdx, dist, dur, P){
     totMi+=mi; totHr+=hr; totBuf+=rttBuf; totDriveHr+=driveHr; totFuelMi+=fuelMi; maxHr=Math.max(maxHr,hr);
     return { seq, miles:mi, hours:hr, driveHours:driveHr, backMiles:backMi, backHours:backHr, buffer:rttBuf, fuelMiles:fuelMi, legs:legList(r, dist) };
   });
+  // ---- Weekly travel with DAILY DEPOT RETURNS: each crew's route is split into D
+  // contiguous day-segments, each a base->sites->base loop. This counts the depot
+  // commute once per working day (not once per week), which is how crews really drive. ----
+  let wkDriveHr=0, wkDriveMi=0, wkFuelMi=0;
+  for(const r of routesIdx){
+    if(!r.length) continue;
+    const chunk=Math.ceil(r.length/D);
+    for(let i=0;i<r.length;i+=chunk){
+      const seg=r.slice(i, i+chunk); let p=0;
+      for(const node of seg){ const lm=dist[p][node]*M2MI; wkDriveMi+=lm; wkDriveHr+=dur[p][node]*S2HR; wkFuelMi+=lm; p=node; }
+      const bm=dist[p][0]*M2MI; wkDriveMi+=bm; wkDriveHr+=dur[p][0]*S2HR; wkFuelMi+=bm; // return to depot
+    }
+  }
   const labor=totHr*rate*people, gas=(totFuelMi/mpg)*gasPrice, total=labor+gas;
-  return { routes, totMi, totHr, maxHr, totBuf, totDriveHr, totFuelMi, labor, gas, total, people };
+  return { routes, totMi, totHr, maxHr, totBuf, totDriveHr, totFuelMi, labor, gas, total, people,
+           wkDriveHr, wkDriveMi, wkFuelMi, daysWeek:D };
 }
 
 /* ---------------- Optimize ---------------- */
@@ -952,7 +968,7 @@ async function optimize(){
 
   // build report (shared with crew-count comparison)
   const rttBuf = Math.max(0, +$('rttbuf').value||0)/60; // hours added per crew, there-and-back
-  const plan = buildPlan(routesIdx, dist, dur, {depF, retF, rttBuf, rate, gasPrice, mpg, people});
+  const plan = buildPlan(routesIdx, dist, dur, {depF, retF, rttBuf, rate, gasPrice, mpg, people, daysWeek:Math.max(1,parseInt($("daysWeek").value)||5)});
   state.result={ ...plan, matMode:mat.mode, matFactor:mat.factor, matMph:mat.mph };
 
   drawRoutes();
@@ -986,7 +1002,7 @@ async function compareCrews(){
     toast(`Solving for ${c} crew${c>1?'s':''}…`);
     await new Promise(r=>setTimeout(r,8));
     const ri=solve(C, n, c, coords, balance);
-    const p=buildPlan(ri, dist, dur, {depF,retF,rttBuf,rate,gasPrice,mpg,people});
+    const p=buildPlan(ri, dist, dur, {depF,retF,rttBuf,rate,gasPrice,mpg,people,daysWeek:Math.max(1,parseInt($("daysWeek").value)||5)});
     rows.push({c, crewsUsed:p.routes.length, totMi:p.totMi, finish:p.maxHr, totHr:p.totHr, labor:p.labor, gas:p.gas, total:p.total});
   }
   hideToast(); $('compare').disabled=false;
@@ -1035,27 +1051,36 @@ function drawRoutes(){
 /* ---------------- Render results ---------------- */
 function renderResult(){
   const R=state.result;
-  $('readout').classList.remove('idle');
-  $('mTotMiles').innerHTML = fmtMi(R.totMi)+' <small>mi</small>';
-  $('mTotTime').textContent = fmtHrs(R.totHr);
-  $('mFinish').textContent = fmtHrs(R.maxHr);
-  $('mLabor').textContent = money(R.labor);
-  $('mGas').textContent = money(R.gas);
-  $('mTotal').textContent = money(R.total);
-
   const rate=+$('rate').value||0, gasPrice=+$('gas').value||0, mpg=+$('mpg').value||1;
   const host=$('tickets'); host.style.display='block'; $('placeholder').style.display='none';
   host.innerHTML='';
   const ppl = R.people||1;
 
-  // ---- Operating totals: scale the ideal optimized weekly pass to real-world day/week/year ----
-  const RW = Math.max(0.01, +$('rwFactor').value||1);
+  // ---- Universal calibration on the DAILY-RETURNS weekly model ----
+  // buildPlan already computed a realistic week's driving (each crew returns to the
+  // depot every working day). The residual factor covers what's still missing (traffic,
+  // non-optimal order). Calibrated so all-branch = $994,000/yr labor.
   const daysYear = Math.max(1, +$('daysYear').value||250);
   const WEEKS=52;
-  const wkHrs = R.totHr*RW,  yrHrs = wkHrs*WEEKS,  dayHrs = yrHrs/daysYear;
-  const wkLabor = wkHrs*ppl*rate, yrLabor = wkLabor*WEEKS, dayLabor = yrLabor/daysYear;
-  const wkGas = (R.totFuelMi*RW/mpg)*gasPrice, yrGas = wkGas*WEEKS, dayGas = yrGas/daysYear;
-  const wkTot = wkLabor+wkGas, yrTot = yrLabor+yrGas, dayTot = dayLabor+dayGas;
+  const factor = Math.max(0.01, +$('rwFactor').value||1);
+  const wkDriveHr=R.wkDriveHr||R.totHr, wkDriveMi=R.wkDriveMi||R.totMi, wkFuelMi=R.wkFuelMi||R.totFuelMi;
+
+  const wkHrs=wkDriveHr*factor,          yrHrs=wkHrs*WEEKS,      dayHrs=yrHrs/daysYear;
+  const wkMiles=wkDriveMi*factor,        yrMiles=wkMiles*WEEKS,  dayMiles=yrMiles/daysYear;
+  const wkLabor=wkHrs*ppl*rate,          yrLabor=wkLabor*WEEKS,  dayLabor=yrLabor/daysYear;
+  const wkGas=(wkFuelMi*factor/mpg)*gasPrice, yrGas=wkGas*WEEKS, dayGas=yrGas/daysYear;
+  const wkTot=wkLabor+wkGas,             yrTot=yrLabor+yrGas,    dayTot=dayLabor+dayGas;
+
+  // ---- Map readout: per-day operating ----
+  $('readout').classList.remove('idle');
+  $('mTotMiles').innerHTML = fmtMi(dayMiles)+' <small>mi</small>';
+  $('mTotTime').textContent = fmtHrs(dayHrs);
+  $('mFinish').textContent = fmtHrs(R.maxHr);
+  $('mLabor').textContent = money(dayLabor);
+  $('mGas').textContent = money(dayGas);
+  $('mTotal').textContent = money(dayTot);
+
+  // ---- Operating totals card (day / week / year) ----
   const col=(lbl,hrs,lab,gas,tot)=>`
       <div class="ops-col">
         <div class="ops-lbl">${lbl}</div>
@@ -1066,13 +1091,13 @@ function renderResult(){
       </div>`;
   const ops=document.createElement('div'); ops.className='ops';
   ops.innerHTML = `
-    <div class="ops-h">Operating estimate <span>· real-world ×${RW.toFixed(2)} · ${ppl}/crew · ${daysYear} days/yr</span></div>
+    <div class="ops-h">Operating estimate <span>· daily returns ${R.daysWeek||5}×/wk · ×${factor.toFixed(2)} · ${ppl}/crew</span></div>
     <div class="ops-grid">
       ${col('Per day', dayHrs, dayLabor, dayGas, dayTot)}
       ${col('Per week', wkHrs, wkLabor, wkGas, wkTot)}
       ${col('Per year', yrHrs, yrLabor, yrGas, yrTot)}
     </div>
-    <div class="ops-foot">Ideal optimized pass: ${fmtHrs(R.totHr)} crew-time · ${fmtMi(R.totMi)} mi (before real-world factor)</div>`;
+    <div class="ops-foot">Weekly driving with daily depot returns: ${fmtHrs(wkDriveHr)} · ${fmtMi(wkDriveMi)} mi (before ×${factor.toFixed(2)}). Ideal single loop: ${fmtHrs(R.totHr)}.</div>`;
   host.appendChild(ops);
 
   // data-source context summary
