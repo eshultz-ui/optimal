@@ -391,10 +391,10 @@
       <div class="sec">
         <h2>Operation</h2>
         <div class="row">
-          <label class="fld grow"><span>Days worked / week</span><input id="daysWeek" class="inp mono" type="number" step="1" min="1" max="7" value="5" /></label>
-          <label class="fld grow"><span>Calibration ×</span><input id="rwFactor" class="inp mono" type="number" step="0.001" min="0.1" value="0.994" /></label>
+          <label class="fld grow"><span>Days worked / week</span><input id="daysWeek" class="inp mono" type="number" step="0.1" min="1" max="7" value="5.3" /></label>
+          <label class="fld grow"><span>Calibration ×</span><input id="rwFactor" class="inp mono" type="number" step="0.001" min="0.1" value="1.055" /></label>
         </div>
-        <div class="hint">One consistent optimization: jobs are split into compact territories near the depot (every crew used) and total driving is minimized. Each crew commutes to its territory and back <b>every working day</b>, so a closer depot cuts the daily commute — which is why the two-branch split comes out cheaper than one spread-out branch. The <b>calibration ×</b> is fit so the all-branch route = $3,600/day; the same factor applies to every run so branches are comparable. Daily = weekly ÷ days/week; annual = weekly × 52.</div>
+        <div class="hint">One consistent optimization: jobs are split into compact territories near the depot (every crew used) and total driving is minimized. Each crew commutes to its territory every working day, so a closer depot cuts the daily commute — which is why the two-branch split comes out cheaper than one spread-out branch. Calibrated so the all-branch route hits your real books: <b>$3,607/day · $19,115/week · $994,000/year</b> (≈5.3 days/week ≈ 275 days/yr). The same factor applies to every run so branches are comparable.</div>
       </div>
 
       <!-- Actions -->
