@@ -1,0 +1,1248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Crew Dispatch — Route Optimizer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+<style>
+  :root{
+    --ink:#0d1117; --panel:#141b24; --panel-2:#1b242f; --raise:#222e3b;
+    --line:#2a3644; --line-soft:#212c38;
+    --text:#e8eef4; --muted:#8a98a8; --muted-2:#6b7889;
+    --hi:#ffb02e; --hi-deep:#ff8a00; --hi-glow:rgba(255,176,46,.16);
+    --good:#3ddc97; --bad:#ff5d5d;
+    --r1:#ffb02e; --r2:#37c6dd; --r3:#e85fb0; --r4:#9bd14a; --r5:#9b8cff;
+    --r6:#ff6b4a; --r7:#2dd4a7; --r8:#f4d03f; --r9:#5aa9ff; --r10:#ff8fb0;
+    --r11:#c0e85f; --r12:#b98cff;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:var(--ink); color:var(--text);
+    font-family:"Inter",system-ui,sans-serif; font-size:14px; line-height:1.45;
+    -webkit-font-smoothing:antialiased;
+  }
+  .app{display:grid; grid-template-columns:392px 1fr; height:100vh; overflow:hidden}
+
+  /* ---------- Sidebar ---------- */
+  .rail{
+    background:var(--panel); border-right:1px solid var(--line);
+    display:flex; flex-direction:column; min-height:0;
+  }
+  .brand{
+    padding:18px 20px 16px; border-bottom:1px solid var(--line);
+    display:flex; align-items:center; gap:12px; flex:0 0 auto;
+  }
+  .brand .mark{
+    width:34px;height:34px;border-radius:8px;flex:0 0 auto;
+    background:linear-gradient(150deg,var(--hi),var(--hi-deep));
+    display:grid;place-items:center; box-shadow:0 0 0 1px rgba(255,176,46,.25), 0 6px 18px -6px var(--hi-glow);
+  }
+  .brand .mark svg{width:20px;height:20px}
+  .brand h1{
+    font-family:"Archivo",sans-serif; font-weight:800; font-size:15px;
+    letter-spacing:.06em; text-transform:uppercase; margin:0; line-height:1.05;
+  }
+  .brand .sub{font-size:11px; color:var(--muted-2); letter-spacing:.14em; text-transform:uppercase; margin-top:3px}
+
+  .scroll{overflow-y:auto; min-height:0; flex:1 1 auto; scrollbar-width:thin; scrollbar-color:var(--line) transparent}
+  .scroll::-webkit-scrollbar{width:9px}
+  .scroll::-webkit-scrollbar-thumb{background:var(--line); border-radius:9px; border:2px solid var(--panel)}
+
+  .sec{padding:16px 20px; border-bottom:1px solid var(--line-soft)}
+  .sec h2{
+    font-family:"Archivo",sans-serif; font-size:11px; font-weight:700;
+    letter-spacing:.16em; text-transform:uppercase; color:var(--muted);
+    margin:0 0 12px; display:flex; align-items:center; gap:8px;
+  }
+  .sec h2 .tag{margin-left:auto; font-family:"JetBrains Mono",monospace; color:var(--hi); font-size:11px; letter-spacing:.04em}
+
+  label.fld{display:block; margin-bottom:11px}
+  label.fld:last-child{margin-bottom:0}
+  .fld > span{display:block; font-size:11px; color:var(--muted); letter-spacing:.04em; margin-bottom:5px}
+  .inp{
+    width:100%; background:var(--ink); border:1px solid var(--line); color:var(--text);
+    border-radius:7px; padding:9px 11px; font-size:13.5px; font-family:inherit; outline:none;
+    transition:border-color .15s, box-shadow .15s;
+  }
+  .inp::placeholder{color:var(--muted-2)}
+  .inp:focus{border-color:var(--hi); box-shadow:0 0 0 3px var(--hi-glow)}
+  .mono{font-family:"JetBrains Mono",monospace}
+
+  .row{display:flex; gap:8px}
+  .row .inp{min-width:0}
+  .grow{flex:1 1 auto}
+
+  .btn{
+    font-family:"Archivo",sans-serif; font-weight:600; letter-spacing:.03em;
+    border:1px solid var(--line); background:var(--panel-2); color:var(--text);
+    border-radius:7px; padding:9px 13px; cursor:pointer; font-size:12.5px;
+    display:inline-flex; align-items:center; justify-content:center; gap:7px;
+    transition:background .15s,border-color .15s,transform .05s; white-space:nowrap;
+  }
+  .btn:hover{background:var(--raise); border-color:#34455a}
+  .btn:active{transform:translateY(1px)}
+  .btn[disabled]{opacity:.45; cursor:not-allowed}
+  .btn.ghost{background:transparent}
+  .btn.sm{padding:7px 10px; font-size:11.5px}
+  .btn.icon{padding:8px; width:34px}
+  .btn.amber{background:linear-gradient(150deg,var(--hi),var(--hi-deep)); color:#241600; border-color:transparent; font-weight:700}
+  .btn.amber:hover{filter:brightness(1.05)}
+  .btn.full{width:100%}
+
+  .seg{display:flex; background:var(--ink); border:1px solid var(--line); border-radius:8px; padding:3px; gap:3px}
+  .seg button{
+    flex:1; border:0; background:transparent; color:var(--muted); cursor:pointer;
+    font-family:"Archivo",sans-serif; font-weight:600; font-size:11.5px; letter-spacing:.05em;
+    padding:7px 6px; border-radius:6px; text-transform:uppercase; transition:all .15s;
+  }
+  .seg button.on{background:var(--raise); color:var(--text); box-shadow:inset 0 0 0 1px var(--line)}
+  .seg button.on[data-obj], .seg button.on[data-bal]{color:var(--hi)}
+
+  .hint{font-size:11px; color:var(--muted-2); margin-top:8px; line-height:1.5}
+  .preset-lbl{font-family:"Archivo",sans-serif; font-size:10px; letter-spacing:.14em; text-transform:uppercase; color:var(--muted-2); margin:2px 0 7px}
+
+  label.chk{display:flex; align-items:center; gap:8px; font-size:12px; color:var(--muted); cursor:pointer; margin-top:4px}
+  label.chk input{accent-color:var(--hi); width:15px; height:15px; cursor:pointer}
+  label.chk span{margin:0}
+
+  .banner{
+    background:rgba(255,93,93,.1); border:1px solid rgba(255,93,93,.4); color:#ffd9d9;
+    border-radius:8px; padding:10px 12px; font-size:12px; line-height:1.5; margin-bottom:11px;
+  }
+  .banner b{color:#fff}
+  .banner.ok{background:rgba(61,220,151,.1); border-color:rgba(61,220,151,.4); color:#caffe7}
+  .banner.ok b{color:#fff}
+
+  /* Stop list */
+  .pt{
+    display:flex; align-items:center; gap:10px; padding:9px 10px; border:1px solid var(--line-soft);
+    border-radius:8px; background:var(--panel-2); margin-bottom:7px;
+  }
+  .pt .pin{
+    width:24px;height:24px;border-radius:6px;flex:0 0 auto; display:grid;place-items:center;
+    font-family:"JetBrains Mono",monospace; font-size:11px; font-weight:700; color:#0d1117;
+  }
+  .pt.base .pin{background:var(--text)}
+  .pt .body{min-width:0; flex:1 1 auto}
+  .pt .nm{font-size:13px; font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .pt .co{font-family:"JetBrains Mono",monospace; font-size:10.5px; color:var(--muted-2)}
+  .pt .x{
+    border:0;background:transparent;color:var(--muted-2);cursor:pointer;padding:4px;border-radius:5px;flex:0 0 auto;
+    line-height:0;
+  }
+  .pt .x:hover{color:var(--bad); background:rgba(255,93,93,.1)}
+  .empty{font-size:12px;color:var(--muted-2); padding:10px 2px; text-align:center}
+
+  /* bulk paste */
+  details.bulk{margin-bottom:10px; border:1px solid var(--line-soft); border-radius:8px; background:var(--ink); overflow:hidden}
+  details.bulk summary{
+    cursor:pointer; list-style:none; padding:9px 12px; font-family:"Archivo",sans-serif;
+    font-size:11.5px; font-weight:600; letter-spacing:.05em; text-transform:uppercase; color:var(--muted);
+    display:flex; align-items:center; gap:8px; user-select:none;
+  }
+  details.bulk summary::-webkit-details-marker{display:none}
+  details.bulk summary::before{content:"+"; font-family:"JetBrains Mono",monospace; color:var(--hi); font-weight:700; font-size:14px}
+  details.bulk[open] summary::before{content:"–"}
+  details.bulk summary:hover{color:var(--text)}
+  details.bulk > *:not(summary){margin:0 12px 12px}
+  details.bulk textarea{resize:vertical; min-height:96px; line-height:1.5; font-family:"JetBrains Mono",monospace; font-size:12px}
+
+  /* ---------- Main / map ---------- */
+  .main{position:relative; min-width:0}
+  #map{position:absolute; inset:0; background:#0a0e13}
+  .leaflet-container{background:#0a0e13; font-family:inherit}
+  .leaflet-control-attribution{background:rgba(13,17,23,.7)!important; color:var(--muted-2)!important}
+  .leaflet-control-attribution a{color:var(--muted)!important}
+  .leaflet-bar a{background:var(--panel-2)!important; color:var(--text)!important; border-color:var(--line)!important}
+  .leaflet-bar a:hover{background:var(--raise)!important}
+
+  /* readout bar over map */
+  .readout{
+    position:absolute; top:16px; left:16px; right:16px; z-index:500;
+    background:linear-gradient(180deg, rgba(20,27,36,.96), rgba(17,22,30,.96));
+    border:1px solid var(--line); border-radius:12px; backdrop-filter:blur(8px);
+    display:grid; grid-template-columns:repeat(6,1fr); overflow:hidden;
+    box-shadow:0 14px 40px -16px rgba(0,0,0,.7);
+  }
+  .readout.idle{display:none}
+  .metric{padding:11px 14px; border-right:1px solid var(--line-soft); min-width:0}
+  .metric:last-child{border-right:0}
+  .metric .k{font-size:9.5px; letter-spacing:.13em; text-transform:uppercase; color:var(--muted-2); white-space:nowrap}
+  .metric .v{font-family:"JetBrains Mono",monospace; font-weight:700; font-size:19px; margin-top:3px; line-height:1; white-space:nowrap}
+  .metric .v small{font-size:11px; color:var(--muted); font-weight:500; margin-left:2px}
+  .metric.accent .v{color:var(--hi)}
+  .metric.total{background:var(--hi-glow)}
+  .metric.total .v{color:var(--hi)}
+
+  /* status toast */
+  .toast{
+    position:absolute; left:50%; bottom:18px; transform:translateX(-50%); z-index:600;
+    background:var(--panel-2); border:1px solid var(--line); color:var(--text);
+    padding:10px 16px; border-radius:999px; font-size:12.5px; display:none; align-items:center; gap:10px;
+    box-shadow:0 10px 30px -10px rgba(0,0,0,.8); max-width:90%;
+  }
+  .toast.show{display:inline-flex}
+  .toast.err{border-color:rgba(255,93,93,.5); color:#ffd9d9}
+  .spin{width:14px;height:14px;border:2px solid var(--line); border-top-color:var(--hi); border-radius:50%; animation:sp .7s linear infinite; flex:0 0 auto}
+  @keyframes sp{to{transform:rotate(360deg)}}
+
+  /* mode banner for map clicking */
+  .modebar{
+    position:absolute; top:74px; left:16px; z-index:500; display:none; align-items:center; gap:10px;
+    background:var(--hi); color:#241600; padding:7px 12px; border-radius:8px; font-size:12px; font-weight:600;
+    box-shadow:0 8px 24px -10px rgba(0,0,0,.6);
+  }
+  .modebar.show{display:flex}
+  .modebar button{border:0;background:rgba(0,0,0,.18);color:#241600;border-radius:5px;cursor:pointer;padding:3px 8px;font-weight:700}
+
+  /* Route ticket cards */
+  .tickets{padding:16px 20px}
+  .ops{background:linear-gradient(180deg,var(--panel-2),var(--panel)); border:1px solid var(--line); border-radius:12px; padding:14px 15px; margin-bottom:12px}
+  .ops-h{font-family:"Archivo",sans-serif; font-weight:800; font-size:13px; letter-spacing:.02em; margin-bottom:11px}
+  .ops-h span{font-family:"Inter",sans-serif; font-weight:500; font-size:10.5px; color:var(--muted-2); letter-spacing:0}
+  .ops-grid{display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px}
+  .ops-col{background:var(--ink); border:1px solid var(--line-soft); border-radius:9px; padding:9px 10px}
+  .ops-lbl{font-family:"Archivo",sans-serif; font-size:9.5px; letter-spacing:.1em; text-transform:uppercase; color:var(--hi); margin-bottom:7px}
+  .ops-row{display:flex; justify-content:space-between; align-items:baseline; gap:4px; padding:2px 0; font-size:11px}
+  .ops-row span{color:var(--muted-2)}
+  .ops-row b{font-family:"JetBrains Mono",monospace; font-weight:700; font-size:11.5px; white-space:nowrap}
+  .ops-row.key b{color:var(--hi); font-size:12.5px}
+  .ops-row.tot{border-top:1px solid var(--line-soft); margin-top:3px; padding-top:5px}
+  .ops-row.tot b{color:var(--text); font-size:11.5px}
+  .ops-foot{font-size:10.5px; color:var(--muted-2); margin-top:10px; line-height:1.4}
+  .trafsum{font-size:11.5px; color:var(--muted); background:var(--panel-2); border:1px solid var(--line-soft);
+    border-radius:8px; padding:8px 11px; margin-bottom:11px; line-height:1.4}
+  .trafsum b{color:var(--hi); font-family:"JetBrains Mono",monospace}
+  .trafsum .est{color:var(--hi); font-weight:700}
+  .ticket li.more{color:var(--muted-2); font-style:italic; border-top:1px dashed var(--line-soft)}
+  .ticket li.more::before{content:"⋯"; background:transparent; border:0; color:var(--muted-2)}
+  .ticket{
+    position:relative; background:var(--panel-2); border:1px solid var(--line); border-radius:10px;
+    padding:13px 14px 13px 16px; margin-bottom:11px; overflow:hidden;
+  }
+  .ticket::before{content:""; position:absolute; left:0; top:0; bottom:0; width:5px; background:var(--rc)}
+  .ticket .th{display:flex; align-items:center; gap:9px; margin-bottom:9px}
+  .ticket .badge{
+    font-family:"Archivo",sans-serif; font-weight:800; font-size:12px; letter-spacing:.04em;
+    color:#0d1117; background:var(--rc); padding:3px 9px; border-radius:5px;
+  }
+  .ticket .th .cnt{font-size:11.5px; color:var(--muted); margin-left:auto; font-family:"JetBrains Mono",monospace}
+  .ticket .stats{display:flex; gap:14px; flex-wrap:wrap; margin-bottom:10px}
+  .ticket .st{font-family:"JetBrains Mono",monospace; font-size:12px}
+  .ticket .st b{color:var(--text); font-weight:700}
+  .ticket .st span{color:var(--muted-2); font-size:10px; letter-spacing:.08em; text-transform:uppercase; display:block; margin-bottom:1px}
+  .ticket ol{margin:0; padding:0; list-style:none; counter-reset:s}
+  .ticket li{
+    font-size:12.5px; padding:5px 0 5px 26px; position:relative; color:var(--text);
+    border-top:1px dashed var(--line-soft);
+  }
+  .ticket li::before{
+    counter-increment:s; content:counter(s); position:absolute; left:0; top:50%; transform:translateY(-50%);
+    width:18px;height:18px;border-radius:5px; background:var(--ink); border:1px solid var(--line);
+    color:var(--rc); font-family:"JetBrains Mono",monospace; font-size:10px; font-weight:700;
+    display:grid;place-items:center;
+  }
+  .ticket li .leg{float:right; color:var(--muted-2); font-family:"JetBrains Mono",monospace; font-size:10.5px}
+  .ticket li em{font-style:normal; color:var(--muted-2); font-size:10.5px}
+  .ticket .ret{font-size:11px; color:var(--muted-2); padding-top:7px; border-top:1px dashed var(--line-soft); margin-top:1px}
+
+  .placeholder{padding:40px 24px; text-align:center; color:var(--muted-2)}
+  .placeholder svg{width:40px;height:40px;opacity:.5;margin-bottom:12px}
+  .placeholder p{font-size:12.5px; line-height:1.6; margin:0}
+
+  /* crew comparison modal */
+  .cmpmodal{position:absolute; inset:0; z-index:700; display:none; align-items:center; justify-content:center;
+    background:rgba(7,10,14,.66); backdrop-filter:blur(3px); padding:24px}
+  .cmpmodal.show{display:flex}
+  .cmpcard{background:var(--panel); border:1px solid var(--line); border-radius:14px; width:min(680px,100%);
+    max-height:88%; overflow:auto; box-shadow:0 24px 70px -20px rgba(0,0,0,.8)}
+  .cmphead{display:flex; align-items:flex-start; gap:12px; padding:18px 20px 14px; border-bottom:1px solid var(--line); position:sticky; top:0; background:var(--panel); z-index:2}
+  .cmphead h3{font-family:"Archivo",sans-serif; font-size:16px; font-weight:800; margin:0; letter-spacing:.01em}
+  .cmphead span{font-size:11.5px; color:var(--muted-2); display:block; margin-top:3px}
+  .cmpx{margin-left:auto; border:1px solid var(--line); background:var(--panel-2); color:var(--muted); cursor:pointer;
+    width:30px; height:30px; border-radius:7px; flex:0 0 auto}
+  .cmpx:hover{color:var(--text); background:var(--raise)}
+  table.cmp{width:100%; border-collapse:collapse; font-size:12.5px; margin:6px 0}
+  table.cmp th{font-family:"Archivo",sans-serif; font-size:10px; letter-spacing:.1em; text-transform:uppercase; color:var(--muted-2);
+    text-align:right; padding:12px 14px 8px; font-weight:700}
+  table.cmp th:first-child{text-align:left}
+  table.cmp td{padding:9px 14px; border-top:1px solid var(--line-soft); text-align:right; font-family:"JetBrains Mono",monospace; color:var(--text)}
+  table.cmp td.cc{text-align:left; font-weight:700}
+  table.cmp td.cc i{color:var(--muted-2); font-style:normal; font-size:10px; font-weight:400}
+  table.cmp td.tot{position:relative; min-width:158px}
+  table.cmp td.tot .bar{position:absolute; left:0; top:50%; transform:translateY(-50%); height:62%; background:var(--line); border-radius:0 4px 4px 0; z-index:0}
+  table.cmp td.tot b, table.cmp td.tot .tg{position:relative; z-index:1}
+  table.cmp tr.r-cheap td{background:rgba(61,220,151,.08)}
+  .tg{font-family:"Archivo",sans-serif; font-size:9px; font-weight:700; letter-spacing:.05em; text-transform:uppercase;
+    padding:2px 6px; border-radius:4px; margin-left:6px; vertical-align:middle}
+  .tg.cheap{background:var(--good); color:#062416}
+  .tg.fast{background:var(--hi); color:#241600}
+  .cmpnote{font-size:12px; color:var(--muted); line-height:1.55; padding:6px 16px 18px; margin:0}
+  .cmpnote b{color:var(--text)}
+
+  /* leaflet markers */
+  .mk{display:grid;place-items:center;font-family:"JetBrains Mono",monospace;font-weight:700;
+      border-radius:50% 50% 50% 2px; transform:rotate(45deg); border:2px solid #0d1117;
+      box-shadow:0 3px 8px rgba(0,0,0,.5)}
+  .mk span{transform:rotate(-45deg); font-size:11px; line-height:1}
+  .mk.base{border-radius:7px; transform:none; background:var(--text); color:#0d1117}
+  .mk.base span{transform:none; font-size:12px}
+
+  @media (max-width:880px){
+    .app{grid-template-columns:1fr; grid-template-rows:auto 56vh; height:auto; min-height:100vh}
+    .main{order:-1; height:56vh}
+    .readout{grid-template-columns:repeat(3,1fr)}
+    .rail{height:auto}
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- ================= SIDEBAR ================= -->
+  <aside class="rail">
+    <div class="brand">
+      <div class="mark">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#241600" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="6" cy="19" r="2"/><circle cx="18" cy="5" r="2"/>
+          <path d="M8 19h6a3 3 0 0 0 3-3V8M16 5H9a3 3 0 0 0-3 3v8"/>
+        </svg>
+      </div>
+      <div>
+        <h1>Crew Dispatch</h1>
+        <div class="sub">Route Optimizer</div>
+      </div>
+    </div>
+
+    <div class="scroll">
+      <!-- Home base -->
+      <div class="sec">
+        <h2>Home Base</h2>
+        <div class="row" style="margin-bottom:8px">
+          <input id="baseAddr" class="inp grow" placeholder="Address or place — e.g. 1 Frank Ogawa Plaza, Oakland" />
+          <button class="btn sm" id="baseFind">Find</button>
+        </div>
+        <div class="row">
+          <input id="baseLat" class="inp mono" placeholder="lat" />
+          <input id="baseLng" class="inp mono" placeholder="lng" />
+          <button class="btn sm icon" id="baseSet" title="Set from lat/lng">Set</button>
+          <button class="btn sm icon" id="basePick" title="Click base on map">📍</button>
+        </div>
+        <div id="baseShow"></div>
+      </div>
+
+      <!-- Jobs -->
+      <div class="sec">
+        <h2>Job Stops <span class="tag" id="jobCount">0</span></h2>
+        <div class="row" style="margin-bottom:8px">
+          <input id="jobAddr" class="inp grow" placeholder="Address of a job site…" />
+          <button class="btn sm" id="jobFind">Add</button>
+        </div>
+        <div class="row" style="margin-bottom:10px">
+          <input id="jobLat" class="inp mono" placeholder="lat" />
+          <input id="jobLng" class="inp mono" placeholder="lng" />
+          <button class="btn sm icon" id="jobSet" title="Add from lat/lng">+</button>
+          <button class="btn sm icon" id="jobPick" title="Click jobs on map">📍</button>
+        </div>
+
+        <details class="bulk" id="bulkBox">
+          <summary>Paste many at once</summary>
+          <textarea id="bulkText" class="inp" rows="6" placeholder="One stop per line — addresses or lat,lng&#10;1355 Market St, San Francisco&#10;2150 Shattuck Ave, Berkeley&#10;37.4419, -122.1430"></textarea>
+          <div class="row" style="margin-top:8px">
+            <button class="btn amber sm grow" id="bulkAdd">Add all stops</button>
+            <button class="btn ghost sm" id="bulkClear">Clear box</button>
+          </div>
+          <div class="hint">Each line becomes a stop. Lines that are <b>lat,lng</b> drop in instantly; addresses are looked up one per second (OpenStreetMap's limit), so a long list takes a moment. Lines that can't be found are reported and left in the box.</div>
+        </details>
+
+        <div id="jobList"></div>
+      </div>
+
+      <!-- Crews & objective -->
+      <div class="sec">
+        <h2>Crews &amp; Goal</h2>
+        <label class="fld">
+          <span>Number of crews (routes)</span>
+          <input id="crews" class="inp mono" type="number" min="1" max="500" value="50" />
+        </label>
+        <span class="fld" style="display:block"><span>Optimize for</span></span>
+        <div class="seg" id="objSeg">
+          <button data-obj="time" class="on">Least time</button>
+          <button data-obj="distance">Least miles</button>
+        </div>
+        <span class="fld" style="display:block; margin-top:11px"><span>Split jobs across crews by</span></span>
+        <div class="seg" id="balSeg">
+          <button data-bal="finish" class="on">Even workload</button>
+          <button data-bal="count">Equal stops</button>
+          <button data-bal="total">Fewest miles</button>
+        </div>
+        <div class="hint"><b>Even workload</b> balances each crew's drive time so they finish together. <b>Equal stops</b> gives every crew about the same number of jobs. <b>Fewest miles</b> minimizes total travel and may leave a crew unused. You can enter any number of crews (up to the number of stops).</div>
+      </div>
+
+      <!-- Costs -->
+      <div class="sec">
+        <h2>Cost Inputs</h2>
+        <div class="row">
+          <label class="fld grow"><span>Crew rate ($/hr)</span><input id="rate" class="inp mono" type="number" step="0.01" value="29.70" /></label>
+          <label class="fld grow"><span>Crew size (people)</span><input id="people" class="inp mono" type="number" step="0.01" min="0.1" value="2.68" /></label>
+        </div>
+        <div class="row">
+          <label class="fld grow"><span>Gas price ($/gal)</span><input id="gas" class="inp mono" type="number" step="0.01" value="4.50" /></label>
+          <label class="fld grow"><span>Vehicle MPG</span><input id="mpg" class="inp mono" type="number" step="0.1" value="18" /></label>
+        </div>
+        <label class="fld"><span>Round-trip time / crew (min)</span><input id="rttbuf" class="inp mono" type="number" step="1" min="0" value="0" /></label>
+        <div class="hint">Labor = crew travel time × rate × crew size (everyone is paid for travel). Crew size can be a decimal average (e.g. 2.68). Gas = miles ÷ MPG × price/gallon, per vehicle.</div>
+      </div>
+
+      <!-- Operating schedule -->
+      <div class="sec">
+        <h2>Operation</h2>
+        <div class="row">
+          <label class="fld grow"><span>Working days / year</span><input id="daysYear" class="inp mono" type="number" step="1" min="1" max="366" value="250" /></label>
+          <label class="fld grow"><span>Real-world factor ×</span><input id="rwFactor" class="inp mono" type="number" step="0.05" min="1" value="4.15" /></label>
+        </div>
+        <div class="hint">The optimizer computes <b>ideal</b> routing (one efficient weekly pass of every site). Real crews drive several times that — traffic, daily depot returns, fixed territories, repeat visits. The <b>real-world factor</b> scales the ideal up to your actual recorded hours; tune it until the per-year <b>Labor</b> matches your books. Labor = drive time × rate × crew size; gas is separate. Annual = weekly × 52; daily = annual ÷ working days/year.</div>
+      </div>
+
+      <!-- Actions -->
+      <div class="sec" style="border-bottom:0">
+        <div id="frameBanner" class="banner" style="display:none">
+          <b>Running in a preview pane.</b> Optimization works here, but typing an <b>address</b> needs a real browser tab. Coordinates and map clicks work anywhere.
+        </div>
+        <button id="run" class="btn amber full" style="padding:12px; font-size:14px; margin-bottom:9px">Optimize routes</button>
+        <button id="compare" class="btn full" style="margin-bottom:11px">Compare crew counts →</button>
+
+        <div class="preset-lbl">Load a preset</div>
+        <div class="row" style="margin-bottom:7px">
+          <button id="loadOld" class="btn ghost grow sm">Old branch · Milpitas (326)</button>
+          <button id="loadNew" class="btn ghost grow sm">New branch · Burlingame (179)</button>
+        </div>
+        <button id="example" class="btn ghost full sm" style="margin-bottom:11px">All sites · both branches (505)</button>
+
+        <div class="row">
+          <button id="conntest" class="btn ghost grow sm">Test address</button>
+          <button id="clear" class="btn ghost grow sm">Clear all</button>
+        </div>
+      </div>
+
+      <!-- Results -->
+      <div id="tickets" class="tickets" style="display:none"></div>
+      <div id="placeholder" class="placeholder">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M9 20l-5.5 2.5v-15L9 5m0 15l6-3m-6 3v-15m6 12l5.5 2.5v-15L15 4.5m0 12.5v-12.5m0 0L9 5"/></svg>
+        <p>Set a home base and add job stops, then optimize.<br>Routes and totals appear here and on the map.</p>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ================= MAP ================= -->
+  <main class="main">
+    <div id="map"></div>
+
+    <div class="modebar" id="modebar">
+      <span id="modeText">Click the map to place the base</span>
+      <button id="modeDone">Done</button>
+    </div>
+
+    <div class="readout idle" id="readout">
+      <div class="metric accent"><div class="k">Total miles</div><div class="v" id="mTotMiles">—</div></div>
+      <div class="metric"><div class="k">Total crew time</div><div class="v" id="mTotTime">—</div></div>
+      <div class="metric"><div class="k">Finish (parallel)</div><div class="v" id="mFinish">—</div></div>
+      <div class="metric"><div class="k">Travel labor</div><div class="v" id="mLabor">—</div></div>
+      <div class="metric"><div class="k">Gas</div><div class="v" id="mGas">—</div></div>
+      <div class="metric total"><div class="k">Total cost</div><div class="v" id="mTotal">—</div></div>
+    </div>
+
+    <div class="toast" id="toast"><span class="spin"></span><span id="toastMsg">Working…</span></div>
+
+    <div class="cmpmodal" id="compareModal">
+      <div class="cmpcard">
+        <div class="cmphead">
+          <div><h3>Crews vs. cost &amp; time</h3><span>Same jobs, every crew count — find your sweet spot</span></div>
+          <button id="compareClose" class="cmpx" title="Close">✕</button>
+        </div>
+        <div id="compareBody"></div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+"use strict";
+const COLORS = ['--r1','--r2','--r3','--r4','--r5','--r6','--r7','--r8','--r9','--r10','--r11','--r12']
+  .map(v=>getComputedStyle(document.documentElement).getPropertyValue(v).trim());
+// Distinct color for any crew index: use the 12-swatch palette, then generate more
+// via the golden-angle so 13+ crews still get separable hues.
+function routeColor(i){
+  if(i<COLORS.length) return COLORS[i];
+  const h=(i*137.508)%360, l=[58,66,50][i%3];
+  return `hsl(${h.toFixed(0)},68%,${l}%)`;
+}
+
+const state = { base:null, jobs:[], result:null, pick:null };
+let uid = 1;
+let IN_FRAME=false; try{ IN_FRAME = window.self !== window.top; }catch(e){ IN_FRAME=true; }
+
+/* ---------------- Map ---------------- */
+const map = L.map('map',{zoomControl:true, attributionControl:true}).setView([37.66,-122.10], 9);
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{
+  attribution:'&copy; OpenStreetMap &copy; CARTO', maxZoom:19, subdomains:'abcd'
+}).addTo(map);
+const markerLayer = L.layerGroup().addTo(map);
+const lineLayer = L.layerGroup().addTo(map);
+
+map.on('click', e=>{
+  if(!state.pick) return;
+  const lat=+e.latlng.lat.toFixed(6), lng=+e.latlng.lng.toFixed(6);
+  if(state.pick==='base'){ setBase(lat,lng,`Base (${lat}, ${lng})`); }
+  else { addJob(lat,lng,`Stop (${lat}, ${lng})`); }
+});
+
+/* ---------------- Helpers ---------------- */
+const $ = id => document.getElementById(id);
+function toast(msg, spinning=true, isErr=false){
+  const t=$('toast'); $('toastMsg').textContent=msg;
+  t.querySelector('.spin').style.display = spinning?'block':'none';
+  t.classList.toggle('err', isErr); t.classList.add('show');
+}
+function hideToast(){ $('toast').classList.remove('show'); }
+function fmtMi(m){ return m.toFixed(1); }
+function fmtHrs(h){ const tot=Math.round(h*60); const hh=Math.floor(tot/60), mm=tot%60; return hh? `${hh}h ${mm}m` : `${mm}m`; }
+function money(v){ return '$'+v.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}); }
+
+
+/* ---------------- Geocode (Nominatim) ---------------- */
+// Restricted to the San Francisco Bay Area so ambiguous addresses can't
+// resolve elsewhere. Box: west -123.6, south 36.85, east -121.2, north 38.85.
+const BAY_VIEWBOX='-123.6,38.85,-121.2,36.85';
+async function geocode(q){
+  const url='https://nominatim.openstreetmap.org/search?format=json&limit=1'
+    +'&countrycodes=us&bounded=1&viewbox='+BAY_VIEWBOX
+    +'&q='+encodeURIComponent(q);
+  const r=await fetch(url,{headers:{'Accept':'application/json'}});
+  if(!r.ok) throw new Error('geocode http '+r.status);
+  const j=await r.json();
+  if(!j.length) throw new Error('No Bay Area match for that address');
+  return { lat:+(+j[0].lat).toFixed(6), lng:+(+j[0].lon).toFixed(6), name:j[0].display_name.split(',').slice(0,2).join(',') };
+}
+
+/* ---------------- Base / Job CRUD ---------------- */
+function setBase(lat,lng,name){ state.base={lat,lng,name}; renderPoints(); drawMarkers(); fitMap(); }
+function addJob(lat,lng,name){ state.jobs.push({id:uid++,lat,lng,name}); renderPoints(); drawMarkers(); fitMap(); }
+function removeJob(id){ state.jobs=state.jobs.filter(j=>j.id!==id); renderPoints(); clearResult(); drawMarkers(); }
+
+function renderPoints(){
+  // base
+  const bs=$('baseShow');
+  if(state.base){
+    bs.innerHTML = `<div class="pt base" style="margin-top:10px">
+      <div class="pin">B</div>
+      <div class="body"><div class="nm">${esc(state.base.name)}</div>
+      <div class="co">${state.base.lat}, ${state.base.lng}</div></div>
+      <button class="x" title="Remove" data-rmbase>✕</button></div>`;
+    bs.querySelector('[data-rmbase]').onclick=()=>{state.base=null; renderPoints(); clearResult(); drawMarkers();};
+  } else bs.innerHTML='';
+  // jobs
+  $('jobCount').textContent=state.jobs.length;
+  const jl=$('jobList');
+  if(!state.jobs.length){ jl.innerHTML='<div class="empty">No stops yet.</div>'; return; }
+  jl.innerHTML='';
+  state.jobs.forEach((j,i)=>{
+    const el=document.createElement('div'); el.className='pt';
+    el.innerHTML=`<div class="pin" style="background:var(--muted)">${i+1}</div>
+      <div class="body"><div class="nm">${esc(j.name)}</div><div class="co">${j.lat}, ${j.lng}</div></div>
+      <button class="x" title="Remove">✕</button>`;
+    el.querySelector('.x').onclick=()=>removeJob(j.id);
+    jl.appendChild(el);
+  });
+}
+function esc(s){ return (s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+/* ---------------- Markers ---------------- */
+function divMarker(label, color, isBase){
+  const html = isBase
+    ? `<div class="mk base" style="width:26px;height:26px"><span>${label}</span></div>`
+    : `<div class="mk" style="width:24px;height:24px;background:${color};color:#0d1117"><span>${label}</span></div>`;
+  return L.divIcon({html, className:'', iconSize:[26,26], iconAnchor:isBase?[13,13]:[5,24]});
+}
+function dot(latlng, color, tip){
+  return L.circleMarker(latlng,{radius:4, color:'#0d1117', weight:1, fillColor:color, fillOpacity:1})
+    .bindTooltip(tip,{direction:'top'});
+}
+function drawMarkers(){
+  markerLayer.clearLayers();
+  const many = state.jobs.length>150; // switch to light dots for big batches
+  if(state.base) L.marker([state.base.lat,state.base.lng],{icon:divMarker('B',null,true)})
+    .bindTooltip(state.base.name,{direction:'top'}).addTo(markerLayer);
+  if(state.result){
+    state.result.routes.forEach((rt,ri)=>{
+      const col=routeColor(ri);
+      rt.seq.forEach((jobIdx,pos)=>{
+        const j=state.jobs[jobIdx];
+        const tip=`${j.name} · Crew ${ri+1}, stop ${pos+1}`;
+        (many ? dot([j.lat,j.lng],col,tip)
+              : L.marker([j.lat,j.lng],{icon:divMarker(pos+1,col,false)}).bindTooltip(tip,{direction:'top'})
+        ).addTo(markerLayer);
+      });
+    });
+  } else {
+    state.jobs.forEach((j,i)=>{
+      (many ? dot([j.lat,j.lng],'#8a98a8',j.name)
+            : L.marker([j.lat,j.lng],{icon:divMarker(i+1,'#8a98a8',false)}).bindTooltip(j.name,{direction:'top'})
+      ).addTo(markerLayer);
+    });
+  }
+}
+function fitMap(){
+  const pts=[]; if(state.base)pts.push([state.base.lat,state.base.lng]);
+  state.jobs.forEach(j=>pts.push([j.lat,j.lng]));
+  if(pts.length>=1) map.fitBounds(L.latLngBounds(pts).pad(0.25),{maxZoom:13});
+}
+
+/* ---------------- Geometric distance matrix ---------------- */
+// Great-circle distance in meters
+function havMeters(a,b){
+  const R=6371000, toR=x=>x*Math.PI/180;
+  const dLa=toR(b.lat-a.lat), dLn=toR(b.lng-a.lng), la1=toR(a.lat), la2=toR(b.lat);
+  const h=Math.sin(dLa/2)**2+Math.cos(la1)*Math.cos(la2)*Math.sin(dLn/2)**2;
+  return 2*R*Math.asin(Math.sqrt(h));
+}
+// Built-in distance assumptions (no user input needed):
+// straight-line distance × ROAD_FACTOR ≈ real street mileage; AVG_MPH sets drive time.
+const ROAD_FACTOR=1.3, AVG_MPH=35;
+// Build distance(m)+duration(s) matrices geometrically. No network, no stop limit.
+// Async only to keep callers simple.
+async function getMatrix(points, onMsg){
+  const N=points.length;
+  const factor=ROAD_FACTOR, mph=AVG_MPH, speed=mph*0.44704; // m/s
+  onMsg && onMsg(N>200?'Building distance matrix…':'Measuring distances…');
+  const dist=new Array(N), dur=new Array(N);
+  for(let i=0;i<N;i++){ dist[i]=new Float64Array(N); dur[i]=new Float64Array(N); }
+  for(let i=0;i<N;i++){
+    for(let j=i+1;j<N;j++){
+      const m=havMeters(points[i],points[j])*factor;
+      dist[i][j]=dist[j][i]=m; dur[i][j]=dur[j][i]=m/speed;
+    }
+  }
+  return { dist, dur, mode:'geometric', factor, mph, N };
+}
+
+/* ---------------- VRP solver ----------------
+   nodes: 0 = base, 1..n = jobs.  Fixed K routes, each base->...->base.
+   C = cost matrix for chosen objective. Reports use real miles + hours.
+*/
+function solveVRP(C, n, K, coords, balance){
+  const jobs=[]; for(let i=1;i<=n;i++) jobs.push(i);
+  const routeCost = seq => { let s=0,p=0; for(const v of seq){s+=C[p][v];p=v;} return s+C[p][0]; };
+
+  function twoOpt(seq){
+    let improved=true;
+    while(improved){ improved=false;
+      for(let i=0;i<seq.length-1;i++){
+        for(let k=i+1;k<seq.length;k++){
+          const a=(i===0?0:seq[i-1]), b=seq[i];
+          const c=seq[k], d=(k===seq.length-1?0:seq[k+1]);
+          if(a===c||b===d) continue;
+          const delta=(C[a][c]+C[b][d])-(C[a][b]+C[c][d]);
+          if(delta<-1e-7){ let lo=i,hi=k; while(lo<hi){[seq[lo],seq[hi]]=[seq[hi],seq[lo]];lo++;hi--;} improved=true; }
+        }
+      }
+    }
+    return seq;
+  }
+  function orOpt(seq){ // move chains of length 1..3
+    let improved=true;
+    while(improved){ improved=false;
+      for(let L=1;L<=3;L++){
+        for(let i=0;i+L<=seq.length;i++){
+          const chain=seq.slice(i,i+L);
+          const rest=seq.slice(0,i).concat(seq.slice(i+L));
+          const base=routeCost(seq);
+          for(let p=0;p<=rest.length;p++){
+            if(p===i && L===1) continue;
+            const cand=rest.slice(0,p).concat(chain, rest.slice(p));
+            if(routeCost(cand)+1e-7<base){ seq.splice(0,seq.length,...cand); improved=true; break; }
+          }
+          if(improved) break;
+        }
+        if(improved) break;
+      }
+    }
+    return seq;
+  }
+  const polish = seq => orOpt(twoOpt(seq));
+
+  // ---- constructions ----
+  function kmeans(seed){
+    let rng=mulberry(seed);
+    const cs=jobs.slice().sort(()=>rng()-0.5).slice(0,K).map(j=>({lat:coords[j].lat,lng:coords[j].lng}));
+    let assign=new Array(n).fill(0);
+    for(let it=0; it<14; it++){
+      for(let a=0;a<n;a++){ const j=jobs[a]; let bi=0,bd=1e18;
+        for(let c=0;c<K;c++){const dl=coords[j].lat-cs[c].lat, dg=coords[j].lng-cs[c].lng; const d=dl*dl+dg*dg; if(d<bd){bd=d;bi=c;}}
+        assign[a]=bi; }
+      const sl=Array.from({length:K},()=>[0,0,0]);
+      for(let a=0;a<n;a++){const j=jobs[a];const c=assign[a];sl[c][0]+=coords[j].lat;sl[c][1]+=coords[j].lng;sl[c][2]++;}
+      for(let c=0;c<K;c++) if(sl[c][2]){cs[c]={lat:sl[c][0]/sl[c][2],lng:sl[c][1]/sl[c][2]};}
+    }
+    const routes=Array.from({length:K},()=>[]);
+    for(let a=0;a<n;a++) routes[assign[a]].push(jobs[a]);
+    return routes;
+  }
+  function sweep(){
+    const ang=jobs.map(j=>({j,a:Math.atan2(coords[j].lat-coords[0].lat, coords[j].lng-coords[0].lng)}))
+      .sort((x,y)=>x.a-y.a).map(o=>o.j);
+    const routes=Array.from({length:K},()=>[]); const per=Math.ceil(n/K);
+    ang.forEach((j,i)=>routes[Math.min(K-1,Math.floor(i/per))].push(j));
+    return routes;
+  }
+
+  // ---- scoring (depends on balance mode) ----
+  // 'finish' : minimize the LONGEST route -> spreads work, every crew gets a route
+  // 'count'  : equalize the number of stops per crew
+  // 'total'  : minimize total travel (may leave some crews idle)
+  function scoreOf(cost, cnts){
+    let total=0, mx=0; for(const c of cost){ total+=c; if(c>mx)mx=c; }
+    if(balance==='total') return {a:0, b:total};
+    if(balance==='finish') return {a:mx, b:total};
+    const used=cnts.length; let sum=0; for(const c of cnts) sum+=c; const avg=sum/used;
+    let sp=0; for(const c of cnts){ const d=c-avg; sp+=d*d; }
+    return {a:sp, b:total};
+  }
+  const better=(s1,s2)=> (s1.a < s2.a-1e-7) ? true : (s1.a > s2.a+1e-7) ? false : (s1.b < s2.b-1e-6);
+
+  // When the user asks for K crews (and there are >= K jobs), every crew MUST get
+  // a route. Only 'total' mode is allowed to leave a crew idle.
+  const forceAll = (balance!=='total') && (n>=K);
+  function repairEmpties(routes){
+    let guard=0;
+    while(guard++ < K*3){
+      const empties=[]; let donor=-1, mx=1;
+      for(let i=0;i<K;i++){ if(routes[i].length===0) empties.push(i); if(routes[i].length>mx){mx=routes[i].length; donor=i;} }
+      if(!empties.length || donor<0) break;
+      // pull the most outlying stop (farthest from base) out of the biggest route into the empty one
+      let bi=0,bv=-1; routes[donor].forEach((job,idx)=>{ const v=C[0][job]; if(v>bv){bv=v;bi=idx;} });
+      const job=routes[donor].splice(bi,1)[0];
+      routes[empties[0]]=[job];
+      if(routes[donor].length) polish(routes[donor]);
+    }
+    return routes;
+  }
+
+  // ---- cross-route local search (relocate + swap), driven by the chosen score ----
+  function improve(routes){
+    if(forceAll) repairEmpties(routes);
+    routes.forEach(r=>{ if(r.length) polish(r); });
+    let cost=routes.map(r=> r.length?routeCost(r):0);
+    let cnts=routes.map(r=>r.length);
+    let cur=scoreOf(cost,cnts);
+    let moved=true, guard=0;
+    while(moved && guard++<90){
+      moved=false;
+      // relocate: pull one stop from route a, drop it in the best slot of some route b
+      for(let a=0;a<K;a++){
+        if(forceAll && routes[a].length<=1) continue; // never empty a required crew
+        for(let pi=0; pi<routes[a].length; pi++){
+          if(forceAll && routes[a].length<=1) break;  // stop before removing its last stop
+          const node=routes[a][pi];
+          const without=routes[a].slice(); without.splice(pi,1);
+          const ca=without.length?routeCost(without):0;
+          let pick=null;
+          for(let b=0;b<K;b++){
+            if(b===a) continue;
+            for(let q=0;q<=routes[b].length;q++){
+              const cand=routes[b].slice(); cand.splice(q,0,node);
+              const cb=routeCost(cand);
+              const nc=cost.slice(); nc[a]=ca; nc[b]=cb;
+              const ncn=cnts.slice(); ncn[a]=without.length; ncn[b]=cand.length;
+              const s=scoreOf(nc,ncn);
+              if(better(s,cur) && (!pick||better(s,pick.s))) pick={b,cand,ca,cb,s,without};
+            }
+          }
+          if(pick){
+            routes[a]=pick.without; routes[pick.b]=pick.cand;
+            if(routes[a].length)polish(routes[a]); polish(routes[pick.b]);
+            cost[a]=routes[a].length?routeCost(routes[a]):0; cost[pick.b]=routeCost(routes[pick.b]);
+            cnts[a]=routes[a].length; cnts[pick.b]=routes[pick.b].length;
+            cur=scoreOf(cost,cnts); moved=true; pi=-1;
+          }
+        }
+      }
+      // swap: trade one stop between two routes
+      for(let a=0;a<K;a++) for(let b=a+1;b<K;b++){
+        for(let i=0;i<routes[a].length;i++) for(let k=0;k<routes[b].length;k++){
+          const ra=routes[a].slice(), rb=routes[b].slice();
+          [ra[i],rb[k]]=[rb[k],ra[i]];
+          const nc=cost.slice(); nc[a]=routeCost(ra); nc[b]=routeCost(rb);
+          const s=scoreOf(nc,cnts); // counts unchanged by a swap
+          if(better(s,cur)){
+            routes[a]=ra; routes[b]=rb; polish(routes[a]); polish(routes[b]);
+            cost[a]=routeCost(routes[a]); cost[b]=routeCost(routes[b]);
+            cur=scoreOf(cost,cnts); moved=true;
+          }
+        }
+      }
+    }
+    const fc=routes.map(r=>r.length?routeCost(r):0), fn=routes.map(r=>r.length);
+    return {routes, score:scoreOf(fc,fn)};
+  }
+
+  // bias used when rebuilding routes so balance modes don't pile onto one crew
+  let avgEdge=0; for(let j=1;j<=n;j++) avgEdge+=C[0][j]; avgEdge/=Math.max(1,n);
+  const BALW = balance==='total' ? 0 : avgEdge*0.5;
+
+  // ---- run candidate starts, keep the best by score ----
+  let best=null, bestS=null;
+  const seeds=[sweep()]; for(let s=0;s<6;s++) seeds.push(kmeans(11+s*7));
+  for(const seed of seeds){
+    const {routes,score}=improve(seed.map(r=>r.slice()));
+    if(!best || better(score,bestS)){ best=routes.map(r=>r.slice()); bestS=score; }
+  }
+  // ---- ruin & recreate perturbations ----
+  let rng=mulberry(98765);
+  for(let it=0; it<55; it++){
+    let routes=best.map(r=>r.slice());
+    const pool=[]; const rm=Math.max(1,Math.round(n*0.2));
+    for(let t=0;t<rm;t++){
+      const ne=routes.map((r,i)=>r.length?i:-1).filter(i=>i>=0);
+      if(!ne.length) break;
+      const ri=ne[(rng()*ne.length)|0], pi=(rng()*routes[ri].length)|0;
+      pool.push(routes[ri][pi]); routes[ri].splice(pi,1);
+    }
+    for(const node of pool){
+      let bI=0,bP=0,bD=1e18;
+      for(let i=0;i<K;i++){ for(let q=0;q<=routes[i].length;q++){
+        const before=routes[i].length?routeCost(routes[i]):0;
+        const cand=routes[i].slice(); cand.splice(q,0,node);
+        const d=(routeCost(cand)-before)+routes[i].length*BALW;
+        if(d<bD){bD=d;bI=i;bP=q;}
+      }}
+      routes[bI].splice(bP,0,node);
+    }
+    const {routes:imp,score}=improve(routes);
+    if(better(score,bestS)){ best=imp.map(r=>r.slice()); bestS=score; }
+  }
+  best.forEach(r=>{ if(r.length) polish(r); });
+  return best;
+}
+
+/* ---------------- Scalable solver for big batches (100s of stops) ----------------
+   kmeans clustering + nearest-neighbour ordering + capped 2-opt, then delta-based,
+   neighbour-limited relocate driven by the same balance score. Runs in well under a
+   second for several hundred stops. */
+function solveLarge(C, n, K, coords, balance){
+  const forceAll=(balance!=='total')&&(n>=K);
+  const rc=seq=>{let s=0,p=0;for(const v of seq){s+=C[p][v];p=v;}return s+C[p][0];};
+  function score(cost,cnts){let total=0,mx=0;for(const c of cost){total+=c;if(c>mx)mx=c;}
+    if(balance==='total')return{a:0,b:total};
+    if(balance==='finish')return{a:mx,b:total};
+    const avg=cnts.reduce((s,c)=>s+c,0)/cnts.length;let sp=0;for(const c of cnts){const d=c-avg;sp+=d*d;}return{a:sp,b:total};}
+  const better=(s1,s2)=>(s1.a<s2.a-1e-7)?true:(s1.a>s2.a+1e-7)?false:(s1.b<s2.b-1e-6);
+  function kmeans(seed){let rng=mulberry(seed);const idx=[];for(let i=1;i<=n;i++)idx.push(i);
+    const cs=idx.slice().sort(()=>rng()-0.5).slice(0,K).map(j=>({lat:coords[j].lat,lng:coords[j].lng}));
+    let asg=new Array(n).fill(0);
+    for(let it=0;it<12;it++){for(let a=0;a<n;a++){const j=a+1;let bi=0,bd=1e18;for(let c=0;c<K;c++){const dl=coords[j].lat-cs[c].lat,dg=coords[j].lng-cs[c].lng;const d=dl*dl+dg*dg;if(d<bd){bd=d;bi=c;}}asg[a]=bi;}
+      const sl=Array.from({length:K},()=>[0,0,0]);for(let a=0;a<n;a++){const j=a+1,c=asg[a];sl[c][0]+=coords[j].lat;sl[c][1]+=coords[j].lng;sl[c][2]++;}
+      for(let c=0;c<K;c++)if(sl[c][2]){cs[c]={lat:sl[c][0]/sl[c][2],lng:sl[c][1]/sl[c][2]};}}
+    const routes=Array.from({length:K},()=>[]);for(let a=0;a<n;a++)routes[asg[a]].push(a+1);return routes;}
+  function nn(arr){const unv=new Set(arr);let cur=0;const out=[];while(unv.size){let best=-1,bd=1e18;for(const j of unv){const d=C[cur][j];if(d<bd){bd=d;best=j;}}out.push(best);unv.delete(best);cur=best;}return out;}
+  function twoOpt(seq){const cap=seq.length>250?1:(seq.length>120?3:6);let it=0,imp=true;
+    while(imp&&it++<cap){imp=false;for(let i=0;i<seq.length-1;i++){for(let k=i+1;k<seq.length;k++){
+      const a=i===0?0:seq[i-1],b=seq[i],c=seq[k],d=k===seq.length-1?0:seq[k+1];if(a===c||b===d)continue;
+      if(C[a][c]+C[b][d]<C[a][b]+C[c][d]-1e-9){let lo=i,hi=k;while(lo<hi){const t=seq[lo];seq[lo]=seq[hi];seq[hi]=t;lo++;hi--;}imp=true;}}}}
+    return seq;}
+  function repair(routes){let g=0;while(g++<K*3){let empties=[],donor=-1,mx=1;for(let i=0;i<K;i++){if(routes[i].length===0)empties.push(i);if(routes[i].length>mx){mx=routes[i].length;donor=i;}}
+    if(!empties.length||donor<0)break;let bi=0,bv=-1;routes[donor].forEach((job,idx)=>{const v=C[0][job];if(v>bv){bv=v;bi=idx;}});const job=routes[donor].splice(bi,1)[0];routes[empties[0]]=[job];}return routes;}
+
+  let routes=kmeans(12345).map(r=>nn(r));routes.forEach(r=>{if(r.length>1)twoOpt(r);});
+  if(forceAll)repair(routes);
+  let cost=routes.map(r=>r.length?rc(r):0), cnts=routes.map(r=>r.length);
+  const NB=Math.min(K-1,3), passes=n>300?5:9;
+  const centroid=r=>{if(!r.length)return coords[0];let la=0,ln=0;for(const j of r){la+=coords[j].lat;ln+=coords[j].lng;}return{lat:la/r.length,lng:ln/r.length};};
+  for(let pass=0;pass<passes;pass++){
+    let moved=false;
+    const cent=routes.map(centroid);
+    const near=routes.map((_,a)=>{const ds=[];for(let b=0;b<K;b++)if(b!==a){const dl=cent[a].lat-cent[b].lat,dg=cent[a].lng-cent[b].lng;ds.push([dl*dl+dg*dg,b]);}ds.sort((x,y)=>x[0]-y[0]);return ds.slice(0,NB).map(x=>x[1]);});
+    for(let a=0;a<K;a++){
+      for(let pi=0;pi<routes[a].length;pi++){
+        if(forceAll&&routes[a].length<=1)break;
+        const ra=routes[a], node=ra[pi];
+        const prevA=pi===0?0:ra[pi-1], nextA=pi===ra.length-1?0:ra[pi+1];
+        const remDelta=C[prevA][nextA]-C[prevA][node]-C[node][nextA];
+        const curScore=score(cost,cnts);
+        let bestMove=null;
+        for(const b of near[a]){
+          const rb=routes[b];let bestPos=0,bestIns=1e18;
+          for(let pos=0;pos<=rb.length;pos++){const prev=pos===0?0:rb[pos-1],next=pos===rb.length?0:rb[pos];const id=C[prev][node]+C[node][next]-C[prev][next];if(id<bestIns){bestIns=id;bestPos=pos;}}
+          const nc=cost.slice();nc[a]=cost[a]+remDelta;nc[b]=cost[b]+bestIns;
+          const ncn=cnts.slice();ncn[a]--;ncn[b]++;
+          const s=score(nc,ncn);
+          if(better(s,curScore)&&(!bestMove||better(s,bestMove.s))){bestMove={b,bestPos,bestIns,s};}
+        }
+        if(bestMove){const b=bestMove.b;ra.splice(pi,1);routes[b].splice(bestMove.bestPos,0,node);
+          cost[a]=ra.length?rc(ra):0;cost[b]=rc(routes[b]);cnts[a]=ra.length;cnts[b]=routes[b].length;moved=true;pi--;}
+      }
+    }
+    if(!moved)break;
+  }
+  routes.forEach(r=>{if(r.length>1)twoOpt(r);});
+  return routes;
+}
+// Pick the right solver for the problem size.
+function solve(C, n, K, coords, balance){ return n>120 ? solveLarge(C,n,K,coords,balance) : solveVRP(C,n,K,coords,balance); }
+
+function mulberry(a){ return function(){ a|=0;a=a+0x6D2B79F5|0; let t=Math.imul(a^a>>>15,1|a); t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; }
+
+/* ---------------- Plan metrics (shared) ---------------- */
+const M2MI=1/1609.344, S2HR=1/3600, FUELSENS=0.5;
+function legList(r, dist){ const out=[]; let prev=0; for(const node of r){ out.push(dist[prev][node]*M2MI); prev=node; } return out; }
+// Turn solver output (node-id routes) + distance/time matrices into per-route detail and totals.
+function buildPlan(routesIdx, dist, dur, P){
+  const {depF, retF, rttBuf, rate, gasPrice, mpg}=P;
+  const people=Math.max(1, P.people||1);
+  let totMi=0, totHr=0, maxHr=0, totBuf=0, totDriveHr=0, totFuelMi=0;
+  const routes = routesIdx.filter(r=>r.length).map((r)=>{
+    let mi=0,driveHr=0,fuelMi=0,prev=0;
+    const seq=r.map(node=>node-1);
+    for(const node of r){
+      const lm=dist[prev][node]*M2MI;
+      mi+=lm; driveHr+=dur[prev][node]*S2HR*depF; fuelMi+=lm*(1+(depF-1)*FUELSENS); prev=node;
+    }
+    const backMi=dist[prev][0]*M2MI, backHr=dur[prev][0]*S2HR*retF;
+    mi+=backMi; driveHr+=backHr; fuelMi+=backMi*(1+(retF-1)*FUELSENS);
+    const hr=driveHr+rttBuf;
+    totMi+=mi; totHr+=hr; totBuf+=rttBuf; totDriveHr+=driveHr; totFuelMi+=fuelMi; maxHr=Math.max(maxHr,hr);
+    return { seq, miles:mi, hours:hr, driveHours:driveHr, backMiles:backMi, backHours:backHr, buffer:rttBuf, fuelMiles:fuelMi, legs:legList(r, dist) };
+  });
+  const labor=totHr*rate*people, gas=(totFuelMi/mpg)*gasPrice, total=labor+gas;
+  return { routes, totMi, totHr, maxHr, totBuf, totDriveHr, totFuelMi, labor, gas, total, people };
+}
+
+/* ---------------- Optimize ---------------- */
+async function optimize(){
+  if(!state.base){ toast('Set a home base first.', false, true); setTimeout(hideToast,2600); return; }
+  if(state.jobs.length<1){ toast('Add at least one job stop.', false, true); setTimeout(hideToast,2600); return; }
+  let K=Math.max(1, Math.min(500, parseInt($('crews').value)||1));
+  K=Math.min(K, state.jobs.length);
+  const objIsTime = document.querySelector('#objSeg button.on').dataset.obj==='time';
+  const balance = document.querySelector('#balSeg button.on').dataset.bal;
+  const rate=+$('rate').value||0, gasPrice=+$('gas').value||0, mpg=+$('mpg').value||1;
+  const people=Math.max(0.1, parseFloat($('people').value)||1);
+
+  $('run').disabled=true;
+  const mat=await getMatrix([state.base, ...state.jobs], m=>toast(m));
+
+  const n=state.jobs.length;
+  // matrices indexed 0..n (0 = base)
+  const dist=mat.dist, dur=mat.dur;
+  const depF=1, retF=1; // no time-of-day traffic
+  const C = objIsTime
+    ? dur.map((row)=>Array.from(row))
+    : dist.map(row=>Array.from(row));
+  const coords=[ {lat:state.base.lat,lng:state.base.lng}, ...state.jobs.map(j=>({lat:j.lat,lng:j.lng})) ];
+
+  toast(n>120?`Optimizing ${n} stops across ${K} crews…`:'Optimizing crew routes…');
+  await new Promise(r=>setTimeout(r,20)); // let UI paint
+
+  const routesIdx = solve(C, n, K, coords, balance); // arrays of node ids (1..n)
+
+  // build report (shared with crew-count comparison)
+  const rttBuf = Math.max(0, +$('rttbuf').value||0)/60; // hours added per crew, there-and-back
+  const plan = buildPlan(routesIdx, dist, dur, {depF, retF, rttBuf, rate, gasPrice, mpg, people});
+  state.result={ ...plan, matMode:mat.mode, matFactor:mat.factor, matMph:mat.mph };
+
+  drawRoutes();
+  drawMarkers();
+  renderResult();
+  hideToast();
+  $('run').disabled=false;
+}
+
+/* ---------------- Compare crew counts ---------------- */
+async function compareCrews(){
+  if(!state.base){ toast('Set a home base first.', false, true); setTimeout(hideToast,2600); return; }
+  if(state.jobs.length<2){ toast('Add at least two job stops to compare.', false, true); setTimeout(hideToast,2600); return; }
+  const objIsTime = document.querySelector('#objSeg button.on').dataset.obj==='time';
+  const balance = document.querySelector('#balSeg button.on').dataset.bal;
+  const rate=+$('rate').value||0, gasPrice=+$('gas').value||0, mpg=+$('mpg').value||1;
+  const rttBuf=Math.max(0,+$('rttbuf').value||0)/60;
+  const people=Math.max(0.1, parseFloat($('people').value)||1);
+  const depF=1, retF=1;
+
+  $('compare').disabled=true;
+  const mat=await getMatrix([state.base, ...state.jobs], m=>toast(m));
+
+  const n=state.jobs.length, chosenK=Math.max(1,parseInt($('crews').value)||1), maxC=Math.min(n, Math.max(12, chosenK), 40);
+  const dist=mat.dist, dur=mat.dur;
+  const coords=[ {lat:state.base.lat,lng:state.base.lng}, ...state.jobs.map(j=>({lat:j.lat,lng:j.lng})) ];
+  const C = objIsTime ? dur.map(row=>Array.from(row)) : dist.map(r=>Array.from(r));
+
+  const rows=[];
+  for(let c=1;c<=maxC;c++){
+    toast(`Solving for ${c} crew${c>1?'s':''}…`);
+    await new Promise(r=>setTimeout(r,8));
+    const ri=solve(C, n, c, coords, balance);
+    const p=buildPlan(ri, dist, dur, {depF,retF,rttBuf,rate,gasPrice,mpg,people});
+    rows.push({c, crewsUsed:p.routes.length, totMi:p.totMi, finish:p.maxHr, totHr:p.totHr, labor:p.labor, gas:p.gas, total:p.total});
+  }
+  hideToast(); $('compare').disabled=false;
+  renderCompare(rows);
+}
+
+function renderCompare(rows){
+  const minCost=Math.min(...rows.map(r=>r.total));
+  const minFinish=Math.min(...rows.map(r=>r.finish));
+  const fastestC=Math.min(...rows.filter(r=>Math.abs(r.finish-minFinish)<1e-6).map(r=>r.c));
+  const maxTotal=Math.max(...rows.map(r=>r.total));
+  const body=rows.map(r=>{
+    const cheap=r.total===minCost, fast=r.c===fastestC;
+    const barW=Math.round(r.total/maxTotal*100);
+    const tags=(cheap?'<span class="tg cheap">cheapest</span>':'')+(fast?'<span class="tg fast">fastest</span>':'');
+    return `<tr class="${cheap?'r-cheap':''}${fast?' r-fast':''}">
+      <td class="cc">${r.c}${r.crewsUsed<r.c?`<i>(${r.crewsUsed} used)</i>`:''}</td>
+      <td>${fmtMi(r.totMi)}</td>
+      <td>${fmtHrs(r.finish)}</td>
+      <td>${fmtHrs(r.totHr)}</td>
+      <td>${money(r.labor)}</td>
+      <td>${money(r.gas)}</td>
+      <td class="tot"><span class="bar" style="width:${barW}%"></span><b>${money(r.total)}</b> ${tags}</td>
+    </tr>`;
+  }).join('');
+  $('compareBody').innerHTML=`
+    <table class="cmp">
+      <thead><tr><th>Crews</th><th>Total mi</th><th>Finish</th><th>Crew hrs</th><th>Labor</th><th>Gas</th><th>Total cost</th></tr></thead>
+      <tbody>${body}</tbody>
+    </table>
+    <p class="cmpnote">More crews finish the work sooner (lower <b>Finish</b>) but cost more in total, because each crew drives its own round trip from base. Fewer crews are cheaper but slower. Pick the row that fits your deadline and budget, then set that crew count and Optimize.</p>`;
+  $('compareModal').classList.add('show');
+}
+
+function drawRoutes(){
+  lineLayer.clearLayers();
+  const many = state.jobs.length>150;
+  for(let ri=0; ri<state.result.routes.length; ri++){
+    const rt=state.result.routes[ri];
+    const pts=[ state.base, ...rt.seq.map(i=>state.jobs[i]), state.base ];
+    const geo=pts.map(p=>[p.lat,p.lng]); // geometric straight segments in optimized order
+    L.polyline(geo,{color:routeColor(ri), weight: many?2:3.2, opacity:.85, lineJoin:'round'}).addTo(lineLayer);
+  }
+}
+
+/* ---------------- Render results ---------------- */
+function renderResult(){
+  const R=state.result;
+  $('readout').classList.remove('idle');
+  $('mTotMiles').innerHTML = fmtMi(R.totMi)+' <small>mi</small>';
+  $('mTotTime').textContent = fmtHrs(R.totHr);
+  $('mFinish').textContent = fmtHrs(R.maxHr);
+  $('mLabor').textContent = money(R.labor);
+  $('mGas').textContent = money(R.gas);
+  $('mTotal').textContent = money(R.total);
+
+  const rate=+$('rate').value||0, gasPrice=+$('gas').value||0, mpg=+$('mpg').value||1;
+  const host=$('tickets'); host.style.display='block'; $('placeholder').style.display='none';
+  host.innerHTML='';
+  const ppl = R.people||1;
+
+  // ---- Operating totals: scale the ideal optimized weekly pass to real-world day/week/year ----
+  const RW = Math.max(0.01, +$('rwFactor').value||1);
+  const daysYear = Math.max(1, +$('daysYear').value||250);
+  const WEEKS=52;
+  const wkHrs = R.totHr*RW,  yrHrs = wkHrs*WEEKS,  dayHrs = yrHrs/daysYear;
+  const wkLabor = wkHrs*ppl*rate, yrLabor = wkLabor*WEEKS, dayLabor = yrLabor/daysYear;
+  const wkGas = (R.totFuelMi*RW/mpg)*gasPrice, yrGas = wkGas*WEEKS, dayGas = yrGas/daysYear;
+  const wkTot = wkLabor+wkGas, yrTot = yrLabor+yrGas, dayTot = dayLabor+dayGas;
+  const col=(lbl,hrs,lab,gas,tot)=>`
+      <div class="ops-col">
+        <div class="ops-lbl">${lbl}</div>
+        <div class="ops-row"><span>Travel</span><b>${Math.round(hrs).toLocaleString()} h</b></div>
+        <div class="ops-row key"><span>Labor</span><b>${money(lab)}</b></div>
+        <div class="ops-row"><span>Gas</span><b>${money(gas)}</b></div>
+        <div class="ops-row tot"><span>Total</span><b>${money(tot)}</b></div>
+      </div>`;
+  const ops=document.createElement('div'); ops.className='ops';
+  ops.innerHTML = `
+    <div class="ops-h">Operating estimate <span>· real-world ×${RW.toFixed(2)} · ${ppl}/crew · ${daysYear} days/yr</span></div>
+    <div class="ops-grid">
+      ${col('Per day', dayHrs, dayLabor, dayGas, dayTot)}
+      ${col('Per week', wkHrs, wkLabor, wkGas, wkTot)}
+      ${col('Per year', yrHrs, yrLabor, yrGas, yrTot)}
+    </div>
+    <div class="ops-foot">Ideal optimized pass: ${fmtHrs(R.totHr)} crew-time · ${fmtMi(R.totMi)} mi (before real-world factor)</div>`;
+  host.appendChild(ops);
+
+  // data-source context summary
+  const tline=document.createElement('div'); tline.className='trafsum';
+  tline.innerHTML = `<span class="est">Estimated distances</span> · straight-line ×${(R.matFactor||1).toFixed(2)} for road miles, ~${Math.round(R.matMph||0)} mph`
+    + (ppl!==1?` · ${ppl} people/crew`:'');
+  host.appendChild(tline);
+  const collapse = R.routes.length>0 && R.routes.some(rt=>rt.seq.length>14);
+  R.routes.forEach((rt,ri)=>{
+    const col=routeColor(ri);
+    const rLabor=rt.hours*rate*ppl, rGas=(rt.fuelMiles/mpg)*gasPrice;
+    const card=document.createElement('div'); card.className='ticket'; card.style.setProperty('--rc',col);
+    let stops;
+    if(collapse && rt.seq.length>14){
+      const head=rt.seq.slice(0,5).map((idx,pos)=>`<li>${esc(state.jobs[idx].name)}${pos===0?' <em>(drive out)</em>':''}<span class="leg">${fmtMi(rt.legs[pos])} mi</span></li>`).join('');
+      const tail=`<li>${esc(state.jobs[rt.seq[rt.seq.length-1]].name)}<span class="leg">${fmtMi(rt.legs[rt.seq.length-1])} mi</span></li>`;
+      stops=head+`<li class="more">… ${rt.seq.length-6} more stops …</li>`+tail;
+    } else {
+      stops=rt.seq.map((idx,pos)=>{
+        const tag = pos===0 ? ' <em>(drive out)</em>' : '';
+        return `<li>${esc(state.jobs[idx].name)}${tag}<span class="leg">${fmtMi(rt.legs[pos])} mi</span></li>`;
+      }).join('');
+    }
+    const bufLine = rt.buffer>0 ? `<div class="ret">＋ round-trip buffer · ${fmtHrs(rt.buffer)}</div>` : '';
+    card.innerHTML=`
+      <div class="th"><span class="badge">CREW ${ri+1}</span><span class="cnt">${rt.seq.length} stop${rt.seq.length>1?'s':''}</span></div>
+      <div class="stats">
+        <div class="st"><span>Miles</span><b>${fmtMi(rt.miles)}</b></div>
+        <div class="st"><span>Total time</span><b>${fmtHrs(rt.hours)}</b></div>
+        <div class="st"><span>Labor</span><b>${money(rLabor)}</b></div>
+        <div class="st"><span>Gas</span><b>${money(rGas)}</b></div>
+      </div>
+      <ol>${stops}</ol>
+      <div class="ret">↩ return to base · ${fmtMi(rt.backMiles)} mi · ${fmtHrs(rt.backHours)}</div>
+      ${bufLine}`;
+    host.appendChild(card);
+  });
+}
+function clearResult(){
+  state.result=null; lineLayer.clearLayers();
+  $('readout').classList.add('idle'); $('tickets').style.display='none';
+  $('placeholder').style.display='block';
+}
+
+/* ---------------- Wire up UI ---------------- */
+$('baseFind').onclick=async()=>{ const q=$('baseAddr').value.trim(); if(!q)return;
+  toast('Looking up address…'); try{ const g=await geocode(q); setBase(g.lat,g.lng,g.name); hideToast(); }
+  catch(e){ toast(e.message,false,true); setTimeout(hideToast,2600);} };
+$('baseSet').onclick=()=>{ const la=+$('baseLat').value, ln=+$('baseLng').value;
+  if(isFinite(la)&&isFinite(ln)) setBase(+la.toFixed(6),+ln.toFixed(6),`Base (${la}, ${ln})`); };
+$('basePick').onclick=()=>startPick('base');
+
+$('jobFind').onclick=async()=>{ const q=$('jobAddr').value.trim(); if(!q)return;
+  toast('Looking up address…'); try{ const g=await geocode(q); addJob(g.lat,g.lng,g.name); $('jobAddr').value=''; hideToast(); }
+  catch(e){ toast(e.message,false,true); setTimeout(hideToast,2600);} };
+$('jobSet').onclick=()=>{ const la=+$('jobLat').value, ln=+$('jobLng').value;
+  if(isFinite(la)&&isFinite(ln)){ addJob(+la.toFixed(6),+ln.toFixed(6),`Stop (${la}, ${ln})`); $('jobLat').value='';$('jobLng').value='';} };
+$('jobPick').onclick=()=>startPick('job');
+
+// ---- Bulk add: paste many addresses / coords ----
+function parseCoordLine(line){
+  // accepts "lat,lng" or "lat lng" (also tolerates a leading label before a comma-free coord pair is ambiguous, so require comma or whitespace-separated numbers only)
+  const m=line.match(/^\s*(-?\d{1,3}(?:\.\d+)?)\s*[, ]\s*(-?\d{1,3}(?:\.\d+)?)\s*$/);
+  if(!m) return null;
+  const la=+m[1], ln=+m[2];
+  if(la>=-90&&la<=90&&ln>=-180&&ln<=180) return {lat:+la.toFixed(6), lng:+ln.toFixed(6)};
+  return null;
+}
+async function bulkAdd(){
+  const raw=$('bulkText').value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
+  if(!raw.length) return;
+  $('bulkAdd').disabled=true;
+  const failed=[]; let added=0; let firstGeocode=true; let pendingRender=0;
+  const pushJob=(lat,lng,name)=>{ state.jobs.push({id:uid++,lat,lng,name}); added++; pendingRender++;
+    if(pendingRender>=50){ renderPoints(); pendingRender=0; } };
+  for(let i=0;i<raw.length;i++){
+    const line=raw[i];
+    const coord=parseCoordLine(line);
+    if(coord){ pushJob(coord.lat, coord.lng, `Stop (${coord.lat}, ${coord.lng})`); continue; }
+    // address -> geocode, throttled to ~1/sec for Nominatim
+    toast(`Looking up ${i+1} of ${raw.length}…`);
+    if(!firstGeocode) await new Promise(r=>setTimeout(r,1100));
+    firstGeocode=false;
+    try{ const g=await geocode(line); pushJob(g.lat,g.lng,g.name); }
+    catch(e){ failed.push(line); }
+  }
+  renderPoints(); clearResult(); drawMarkers(); fitMap(); // render once at the end
+  $('bulkAdd').disabled=false;
+  $('bulkText').value = failed.join('\n');   // leave only the lines that failed
+  if(failed.length){ toast(`Added ${added}. ${failed.length} couldn't be found — left in the box.`, false, true); setTimeout(hideToast,4200); }
+  else { toast(`Added ${added} stop${added!==1?'s':''}.`, false, false); setTimeout(hideToast,2200); }
+}
+$('bulkAdd').onclick=bulkAdd;
+$('bulkClear').onclick=()=>{ $('bulkText').value=''; };
+
+$('baseAddr').addEventListener('keydown',e=>{if(e.key==='Enter')$('baseFind').click();});
+$('jobAddr').addEventListener('keydown',e=>{if(e.key==='Enter')$('jobFind').click();});
+
+function startPick(kind){
+  state.pick=kind; $('modebar').classList.add('show');
+  $('modeText').textContent = kind==='base' ? 'Click the map to place the base' : 'Click the map to drop job stops (multiple OK)';
+}
+$('modeDone').onclick=()=>{ state.pick=null; $('modebar').classList.remove('show'); };
+
+document.querySelectorAll('#objSeg button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('#objSeg button').forEach(x=>x.classList.remove('on'));
+  b.classList.add('on');
+});
+document.querySelectorAll('#balSeg button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('#balSeg button').forEach(x=>x.classList.remove('on'));
+  b.classList.add('on');
+});
+
+$('run').onclick=optimize;
+$('compare').onclick=compareCrews;
+$('compareClose').onclick=()=>$('compareModal').classList.remove('show');
+$('compareModal').addEventListener('click',e=>{ if(e.target===$('compareModal')) $('compareModal').classList.remove('show'); });
+$('clear').onclick=()=>{ state.base=null; state.jobs=[]; clearResult(); renderPoints(); drawMarkers(); };
+['rate','gas','mpg','rttbuf','people','daysYear','rwFactor'].forEach(id=>$(id).addEventListener('change',()=>{ if(state.result){ recost(); } }));
+
+function recost(){ // recompute cost + round-trip buffer + headcount without re-routing
+  const R=state.result; const rate=+$('rate').value||0, gasPrice=+$('gas').value||0, mpg=+$('mpg').value||1;
+  const rttBuf=Math.max(0, +$('rttbuf').value||0)/60;
+  const people=Math.max(0.1, parseFloat($('people').value)||1); R.people=people;
+  let maxHr=0;
+  R.routes.forEach(rt=>{ rt.buffer=rttBuf; rt.hours=rt.driveHours+rttBuf; if(rt.hours>maxHr)maxHr=rt.hours; });
+  R.totBuf=rttBuf*R.routes.length;
+  R.totHr=R.totDriveHr+R.totBuf;
+  R.maxHr=maxHr;
+  R.labor=R.totHr*rate*people; R.gas=(R.totFuelMi/mpg)*gasPrice; R.total=R.labor+R.gas; renderResult();
+}
+
+const OLD_BRANCH_JOBS=[[37.293194,-121.966476,"Hamilton Plaza (Campbell)"],[37.427385,-122.098044,"Intuit MTV 22 (Mountain View)"],[37.428764,-122.09764,"Intuit MTV 20 (Mountain View)"],[37.402064,-122.056545,"515 North Whisman (Mountain View)"],[37.404508,-122.056087,"313 Fairchild - now CBRE (Mountain View)"],[37.404092,-122.05514,"323 Fairchild - now CBRE (Mountain View)"],[37.39846,-122.057561,"CBRE - QD6 - 379 Whisman (Mountain View)"],[37.399819,-122.058068,"CBRE - QD5 - 399 Whisman (Mountain View)"],[37.398667,-122.052754,"CBRE - QD3 - 468 Ellis (Mountain View)"],[37.399524,-122.052994,"CBRE- QD1 - 464 Ellis (Mountain View)"],[37.39957,-122.057111,"CBRE - QD4 - 389 Whisman (Mountain View)"],[37.398612,-122.058513,"CBRE - QD7 - 369 Whisman (Mountain View)"],[37.399845,-122.05413,"CBRE -QD2 - 466 Ellis (Mountain View)"],[37.431897,-122.097858,"2551 Casey MTV 17 (Mountain View)"],[37.408622,-122.034225,"Moffett Towers II (Sunnyvale)"],[37.403022,-122.031064,"Tech Corners (Sunnyvale)"],[37.394013,-122.037232,"Google - 645 North Mary - not part of main portfolio (Sunnyv"],[37.244349,-121.94917,"15400 National (Los Gatos)"],[37.287289,-121.945791,"Campbell Memorial Chapel - Darling Fisher - all on one job"],[37.323596,-122.039847,"Whole Foods Cupertino"],[37.314762,-122.051006,"Westmont Park Villas (Cupertino)"],[37.321088,-122.02674,"Chateau Cupertino"],[37.334988,-122.042903,"Valley Church of Cupertino"],[37.47448,-121.92877,"Transcontinental/Bay Area Prod Service (Fremont)"],[37.566132,-122.004953,"Southwyke Terrace (Fremont)"],[37.474126,-121.934601,"Evolve, 47300 Bayside Parkway, Fremont"],[37.467279,-121.927351,"Tesla - NA US CA Fremont 48370 Kato Road - Fremont"],[37.487715,-121.938435,"Thermo Fisher Fremont"],[37.473783,-121.9362,"47211-47241 Bayside Parkway  -Bizlink (Fremont)"],[37.473931,-121.939775,"3400 Gateway (Fremont)"],[37.666714,-122.084795,"Grand Terrace HOA (Hayward)"],[37.639307,-122.126281,"Hayward Industrial - 23751-23787 Eichler, Hayward"],[37.651182,-122.143322,"Wall to Wall (Hayward)"],[37.650314,-122.091733,"Jackson Flats - 24900 Santa Clara St, Hayward"],[37.664723,-122.115221,"Junction Flats - 816 W A Street, Hayward"],[37.650498,-122.068242,"Raising Cane's #589 (Hayward)"],[37.649757,-122.081524,"Garden Walk/Huntwood - 25445 Huntwood Ave, Hayward"],[37.650345,-122.087687,"Eden Issei - 200 Fagundes Street, Hayward"],[37.6288,-122.047219,"Atlas @ Mission Village - 29706 Hansen St, Hayward"],[37.611443,-122.027336,"Sara Conner Court - 32540 Pulaski Drive, Hayward"],[37.528051,-122.055479,"Newark Gateway HOA - 8559 Mahogany Place, Newark (Hayward)"],[37.676984,-122.077865,"Silvergate Condos (Hayward)"],[37.670368,-122.090668,"Glen Eden - 561 A Street, Hayward"],[37.677821,-122.093767,"Montgomery Plaza - 21659 Montgomery Street, Hayward"],[37.651448,-122.126752,"1844 W Winton Ave, Hayward"],[37.646837,-122.121908,"Natural Formulas - 2125 American Avenue, Hayward"],[37.669508,-122.091247,"Sycamore Square - 22560 Alice Street, Hayward"],[37.632211,-122.052325,"Sycamore Square 363 - 363 Valle Vista, Hayward"],[37.403486,-122.117649,"Peninsula Real (Los Altos)"],[37.234419,-121.978689,"Chapel of the Hills - Darling Fisher - all on on one job (Lo"],[37.418876,-121.922123,"SanDisk (Milpitas)"],[37.451035,-121.919476,"Waterstone (Milpitas)"],[37.421405,-121.884932,"963 Ames (Milpitas)"],[37.407342,-121.91536,"CS Bio (Milpitas)"],[37.371396,-122.062163,"Cuernavaca (Mountain View)"],[37.407885,-122.092008,"1983 San Luis (Mountain View)"],[37.526071,-121.999227,"Costco Newark"],[37.521294,-122.03633,"7411 Central (Newark)"],[37.520587,-122.049918,"Newark Station"],[37.444329,-122.133266,"First Congregational Church of Palo Alto"],[37.418267,-122.130635,"Woodcrest - 393 Curtner Ave, Palo Alto"],[37.440403,-122.158683,"909 Alma (Palo Alto)"],[37.252564,-121.79694,"5500 Monterey Road (San Jose)"],[37.318066,-121.810508,"Costco Evergreen (San Jose)"],[37.308248,-121.885898,"Willow Glen Creek HOA (San Jose)"],[37.304303,-121.951222,"Bethel Church San Jose"],[37.257893,-121.778306,"Family Community Church (San Jose)"],[37.268463,-121.90709,"Meridian at Wllow Glen (San Jose)"],[37.319269,-121.808602,"Raising Cane's #845 (San Jose)"],[37.381708,-121.899534,"880 Ridder (San Jose)"],[37.390322,-121.896867,"1941 Ringwood (San Jose)"],[37.373115,-121.844673,"Raising Cane's #722 (San Jose)"],[37.410827,-121.941221,"105 E Tasman (San Jose)"],[37.389792,-121.896283,"1921 Ringwood (San Jose)"],[37.389661,-121.89643,"CH Reynolds (San Jose)"],[37.353239,-121.851547,"Mayfair Apartments (San Jose)"],[37.365165,-121.865423,"City Wide 1800-1810 Dobbin Drive (San Jose)"],[37.335096,-121.853296,"AMS (San Jose)"],[37.364794,-121.866242,"City Wide 660 North King Road (San Jose)"],[37.341132,-121.880898,"Darling Fischer Garden Chapel - all on one job (San Jose)"],[37.334868,-121.852653,"1123-1135 Olinder (San Jose)"],[37.698124,-122.113921,"Quail Run Apartments - 1511 163rd Avenue, San Leandro"],[37.704867,-122.157485,"Teagarden Street (San Leandro)"],[37.726028,-122.149514,"Joaquin Avenue - 500 Joaquin Avenue, San Leandro"],[37.684367,-122.117005,"Paseo Grande - 11 Paseo Grande, San Lorenzo"],[37.373527,-121.958593,"Roche Santa Clara"],[37.360093,-121.942217,"Avis Budget - 552 Reed (Santa Clara)"],[37.36653,-121.994076,"Bethel Church Santa Clara"],[37.348475,-122.042737,"Church of the Resurrection (Sunnyvale)"],[37.384612,-121.989455,"535 Oakmead, Sunnyvale (Oakmead Parkway)"],[37.371999,-121.994387,"Costco Sunnyvale"],[37.584602,-122.023188,"USA Vintage Court Senior Apts (Union City)"],[37.337324,-122.085875,"Forum - 10 minutes from Santana Row (Cupertino)"],[37.153633,-121.657924,"Madrone Business Park (Gilroy)"],[37.011672,-121.597061,"Valley Oaks II HOA (Gilroy)"],[37.012251,-121.583556,"Mission Park Apartments (Gilroy)"],[36.988578,-121.559519,"Hilton Garden Inn Gilroy"],[37.392832,-122.123473,"The Terraces Los Altos"],[37.250928,-121.956747,"Bellaterra HOA (Los Gatos)"],[37.255549,-121.967144,"Bay Club Courtside (Los Gatos)"],[37.2227,-121.982502,"Old Towne Los Gatos"],[37.253031,-121.961442,"Levy Family Campus (Los Gatos)"],[37.235829,-121.962334,"Cornerstone of Los Gatos"],[37.451302,-122.15589,"750 University (Los Gatos)"],[37.251227,-121.955997,"Market Hall (next to BellaTerra) (Los Gatos)"],[37.143526,-121.657031,"18255 Sutter Blvd (Morgan Hill)"],[37.155095,-121.658739,"CTC Morgan Hill II - 18640 Madrone"],[37.150569,-121.657041,"Madrone Village Shopping Center (Morgan Hill)"],[37.150842,-121.657922,"18630 Sutter Blvd (Morgan Hill)"],[37.151231,-121.658522,"18640 Sutter Blvd (Morgan Hill)"],[37.14951,-121.659235,"350 Woodview Avenue (Morgan Hill)"],[37.156109,-121.651367,"Cochrane Business Ranch -Sutter Boulevard, Woodview Ave, Coc"],[37.151234,-121.663806,"Silicon Valley Glass - 18695 Madrone Parkway (Morgan Hill)"],[37.148841,-121.660044,"355-365 Woodview Avenue (Morgan Hill)"],[37.150735,-121.659162,"18635 Sutter Blvd (Morgan Hill)"],[37.153606,-121.6587,"Applied Motion Products - 18645 Madrone (Morgan Hill)"],[37.150036,-121.658373,"18625 Sutter Blvd (Morgan Hill)"],[37.150036,-121.658373,"18625 Sutter Blvd - Courtyard (Morgan Hill)"],[37.320909,-121.947489,"Santana Row (San Jose)"],[37.250948,-121.797464,"Station 121 (San Jose)"],[37.318316,-121.951105,"Winchester Mystery House (San Jose)"],[37.321898,-121.9482,"Misora Apartments (San Jose)"],[37.382747,-121.924275,"2460-2480 North First Street (San Jose)"],[37.257365,-121.86309,"One Pearl Place (San Jose)"],[37.320958,-121.946612,"Levare Apartments (San Jose)"],[37.34213,-121.924093,"1960 The Alameda (San Jose)"],[37.317865,-121.949489,"550 South Winchester (San Jose)"],[37.410677,-121.943014,"91 E. Tasman (San Jose)"],[37.317795,-121.947272,"3031 Tisch Way (San Jose)"],[37.33973,-121.92256,"1871 The Alameda (San Jose)"],[37.363683,-121.890255,"761-765 Mabury Road (San Jose)"],[37.376298,-121.91567,"111-151 Brokaw Road +339 +226 (San Jose)"],[37.363749,-121.881489,"985 Timothy Drive (San Jose)"],[37.318806,-121.94736,"Meso (Santana Row) (San Jose)"],[37.3212,-121.948022,"Mendocino Farms Santana Row (San Jose)"],[37.318949,-121.882543,"201 Willow Street - Toeniskoetter (San Jose)"],[37.376158,-121.986056,"Bay Club Santa Clara"],[37.382339,-121.941702,"3200-3210 De La Cruz / 445 Laurelwood (Santa Clara)"],[36.976877,-122.029256,"133 Mission St (Santa Cruz)"],[37.062976,-122.006888,"Granite Creek Business Park (Scotts Valley)"],[37.060689,-122.007867,"5550 Scotts valley dr"],[37.059746,-122.008126,"Digital Dynamics (Scotts Valley)"],[37.373363,-121.989475,"Kifer Commerce Condominium (Sunnyvale)"],[37.341243,-122.043408,"Rhonda Village (Sunnyvale)"],[37.261967,-121.966241,"El Camino Hospital - 555 Knowles (Los Gatos)"],[37.293384,-121.958909,"El Camino Hospital - 429 Llewellyn Ave (Campbell)"],[37.322508,-122.012691,"19400 Stevens Creek, part of El Camino Hospital, separate bi"],[37.549178,-122.065112,"Meta CBRE - FRE 114 -6552 Kaiser Drive (Fremont)"],[37.549958,-122.063997,"Meta CBRE - FRE 120 - 6504 Kaiser Drive (Fremont)"],[37.546505,-122.061442,"Meta CBRE - FRE 126 -6750 Dumbarton Circle (Fremont)"],[37.545611,-122.062748,"Meta CBRE - FRE 127 - 6800  Dumbarton Circle (Fremont)"],[37.544885,-122.063763,"Meta CBRE - FRE 128 - 6900 Dumbarton Circle (Fremont)"],[37.54997,-122.060233,"Meta CBRE - FRE 123 - 6519 Dumbarton Circle (Fremont)"],[37.550734,-122.060692,"Meta CBRE - FRE 124 - 6503 Dumbarton Circle (Fremont)"],[37.546794,-122.066043,"Meta \"The Farm\" FRE 111 - 34800 Campus Dr (Fremont)"],[37.548764,-122.066479,"Meta \"The Farm\" FRE 113 - 34700 Campus Dr (Fremont)"],[37.54776,-122.066256,"Meta \"The Farm\" FRE 112 - 34750 Campus Drive (Fremont)"],[37.546046,-122.06567,"Meta CBRE - FRE 110 - 7601 Dumbarton Circle (Fremont)"],[37.54729,-122.060382,"Meta CBRE - FRE 125 -  6700 Dumbarton Circle (Fremont)"],[37.549757,-122.063331,"Meta \"The Farm\" FRE 115 - 6540 Kaiser Drive (Fremont)"],[37.547892,-122.062209,"Meta \"The Farm\" FRE 118 - 6591 Dumbarton Circle (Fremont)"],[37.547863,-122.064042,"Meta \"The Farm\" FRE 117 - 6611 Dumbarton Circle (Fremont)"],[37.54917,-122.061124,"Meta CBRE - FRE 122 - 6539 Dumbarton Circle (Fremont)"],[37.546489,-122.064041,"Meta CBRE - FRE 116 - 6623 Dumbarton Circle (Fremont)"],[37.503632,-121.980478,"Meta - Fre2700 42700 Boyce Rd (Fremont)"],[37.262306,-121.966911,"El Camino Hospital Owned (Los Gatos)"],[37.451461,-121.920616,"1533 California - part of El Camino Hospital - separate (Mil"],[37.368323,-122.082064,"El Camino Hospital - 2500 Hospital Association - (Mountain V"],[37.383424,-122.079972,"399 W. El Camino Real (Mountain View)"],[37.368323,-122.082064,"El Camino Hospital 2500 Hospital Buidling 7 (Mountain View)"],[37.521253,-122.04403,"Meta - OAK101 8130 Enterprise (Newark)"],[37.398954,-122.141971,"Cardinal 2025 Propco - was Broadcom Lease B (Palo Alto)"],[37.398954,-122.141971,"VMWare/ Broadcom (Palo Alto)"],[37.382896,-121.926111,"Ebay (San Jose)"],[37.250824,-121.948548,"2460 Samaritan Drive (San Jose)"],[37.392842,-122.046966,"LinkedIn Sunnyvale Campus - National Accounts"],[37.381984,-122.034246,"Sunnyvale Business Park"],[37.321693,-122.030337,"CCC Common Area (Cupertino)"],[37.321693,-122.030337,"20400/20450 Stevens Creek - CCC (Cupertino)"],[37.321433,-122.029582,"CCC Garage (Cupertino)"],[37.488526,-121.957027,"LAM Research (Fremont)"],[37.501836,-121.938469,"BART, Warm Springs, 45193 Warm Springs Blvd, Fremont"],[37.472476,-121.934601,"47281-47361 Bayside Parkway (Fremont)"],[37.481075,-121.942188,"3400-3450 Warren Avenue (Fremont)"],[37.460645,-121.920567,"48900 Milmont (Fremont)"],[37.49208,-121.952206,"LAM Research - 45700 Northport Loop (Fremont)"],[37.481075,-121.942188,"3400-3500 Warren (3500-3550 W Warren) (Fremont)"],[37.475059,-121.93549,"47200 Bayside (Fremont)"],[37.55402,-121.976763,"Civic Center Place (Fremont)"],[37.546734,-122.053617,"Challenger Ardenwood (Newark)"],[37.44549,-122.12132,"Oregon Green HOA (Palo Alto)"],[37.437665,-122.173009,"Old Winery /Stanford Barn (Palo Alto)"],[37.420405,-122.111792,"Challenger Middlefield (Palo Alto)"],[37.423132,-122.104716,"3960 - 3980 Fabian Way (Palo Alto)"],[37.451302,-122.15589,"Villa Capri Aire HOA (Palo Alto)"],[37.450509,-122.123022,"BGOGC 2197 Bayshore Owner LLC (Palo Alto)"],[37.449965,-122.120976,"BGOGC 2225 Bayshore Owner LLC (Palo Alto)"],[37.405969,-122.14599,"3330 Hillview (Palo Alto)"],[37.400627,-121.9322,"Broadcom - 228-280 Innovation (San Jose)"],[37.385344,-121.90008,"Broadcom - 1310-1320 Ridder Park (San Jose)"],[37.385689,-121.902498,"Broadcom - 1730 Fox Drive (San Jose)"],[37.370851,-121.896074,"Challenger Gish Road (Berryessa) (San Jose)"],[37.311472,-121.845501,"Service Station Systems (San Jose)"],[37.721759,-122.160828,"BART San Leandro, 1401 San Leandro Blvd"],[37.37268,-121.967863,"Nvidia (Santa Clara)"],[37.373305,-121.964049,"Nvidia Buildings S, T, U (Santa Clara)"],[37.335512,-122.015065,"Kimco -Cupertino Village #113440"],[37.318889,-122.04091,"LDS - Stelling (Cupertino)"],[37.311161,-122.02581,"LDS - Bollinger (Cupertino)"],[36.939248,-121.776175,"Kimco - Freedom Centre #120020"],[37.467677,-121.903663,"LDS - Scott Creek (Fremont)"],[37.574527,-122.029889,"LDS - Decoto (Fremont)"],[37.560635,-121.96844,"LDS - Walnut - Central Park, Fremont (SL)"],[37.467677,-121.903663,"LDS - Fremont CA Stk-Lurc-48950 Green Valley"],[37.662051,-122.056748,"LDS - 2000 Highland Blvd, Hayward"],[37.394404,-122.111421,"LDS - 190 Jordan - Los Altos"],[37.358928,-122.07852,"LDS - 1300 Grant - Los Altos"],[37.262306,-121.966911,"El Camino Hospital  Leased (Los Gatos)"],[37.235906,-121.985208,"LDS - Rose (Los Gatos)"],[37.132582,-121.959165,"LDS - 23185 Summit Road, Los Gatos"],[37.42228,-121.91828,"Milpitas Square"],[37.414947,-121.890005,"Siena HOA (Milpitas)"],[37.444454,-121.876646,"Bayview Park HOA (Milpitas)"],[37.419583,-121.887378,"Evoqua (Milpitas)"],[37.400868,-122.057864,"The Vineyard (Mountain View)"],[37.405101,-122.057089,"Locus Technologies (Mountain View)"],[37.535749,-122.043669,"LDS - Haley (Newark)"],[37.421489,-122.11028,"LDS - Middlefield (Palo Alto)"],[37.414888,-122.112413,"Green Meadow (Palo Alto)"],[37.424233,-122.15183,"LDS - Palo Alto California Institute"],[37.322137,-121.995112,"Kimco - Stevens Creek Central #118190 (San Jose)"],[37.390098,-121.884969,"Costco NE San Jose #1004 - 1704 Automation"],[37.285608,-121.860669,"Tuscany Hill HOA  (Chianti) (San Jose)"],[37.307475,-121.810628,"Kimco - Silvercreek Plaza #118840 (San Jose)"],[37.292263,-121.814534,"LDS - McLaughin (San Jose)"],[37.294597,-121.76918,"LDS - 4977 San Felipe Road (San Jose)"],[37.375321,-121.851095,"Mabury Manor (San Jose)"],[37.310941,-121.983895,"LDS - Cera (San Jose)"],[37.330835,-121.894251,"Adobe - San Jose Founders  Tower"],[37.321128,-121.823853,"Lion Plaza (San Jose)"],[37.267063,-121.822799,"Lifemoves - 1 Branham (San Jose)"],[37.378858,-121.839869,"LDS - Patt (San Jose)"],[37.229029,-121.773222,"LDS - Bernal (San Jose)"],[37.247219,-121.834662,"LDS - Comanche (San Jose)"],[37.221865,-121.853724,"LDS - Camden (San Jose)"],[37.330835,-121.894251,"Adobe - San Jose Towers"],[37.302278,-121.90364,"LDS - Cherry Historic Building (San Jose)"],[37.409085,-121.869024,"LDS - Cropley (San Jose)"],[37.260966,-121.907116,"LDS - 1655 Noreen Drive - Cambrian Park Hillsdale (San Jose)"],[37.398587,-121.911354,"1060 Rincon Circle (San Jose)"],[37.299578,-121.951881,"Oak Tree Gardens - 3145 Loma Verde Drive - San Jose - MB Man"],[37.292715,-121.877352,"2102 Almaden - San Jose"],[37.347761,-121.904829,"LifeMoves (San Jose)"],[37.331473,-121.895271,"Adobe - McEnery Park (San Jose)"],[37.338137,-121.882988,"LDS - 66 South 7th Street (San Jose)"],[37.322766,-121.994569,"Kimco - On the Corner @ Stevens Creek #118630 (San Jose)"],[37.688699,-122.136406,"Kimco - Grenhouse Marketplace #120260 (San Leandro)"],[37.701362,-122.128829,"Kimco - Fashion Faire Place #114550 (San Leandro)"],[37.714255,-122.139571,"LDS - 13901 Bancroft Avenue - San Leandro"],[37.681098,-122.134693,"LDS - 859 Grant Avenue, San Lorenzo"],[37.390356,-121.974457,"Santa Clara Marriott"],[37.387377,-121.944877,"North Valley Baptist Church (Santa Clara)"],[37.340508,-121.985735,"LDS - Quince (Santa Clara)"],[37.40286,-121.977069,"Santa Clara Hilton"],[37.380859,-121.978396,"3303 Scott Blvd (Santa Clara)"],[37.371616,-121.971465,"2775 Northwestern parkway, Santa Clara"],[37.267268,-122.00541,"LDS - Saratoga CA LURC Pavlion Ballfied"],[37.26631,-122.005936,"LDS - Saratoga California Institute"],[37.352923,-122.044356,"LDS - Fremont Ave (Sunnyvale)"],[37.353078,-122.005426,"Belmont Village of Sunnyvale"],[37.375341,-122.016179,"740 Kifer (Sunnyvale)"],[37.586996,-122.025146,"LDS - Union City"],[37.55255,-122.027432,"Dumbarton Bridge (Fremont)"],[37.652339,-122.09065,"San Mateo Bridge (Hayward)"],[37.394366,-122.146752,"1070 Arastradero (Palo Alto)"],[37.422376,-122.145942,"777 California (Palo Alto)"],[37.63219,-122.425621,"SMCOE  Vocational Ed. Center - 1280 Commodore Drive (San Bru"],[37.26515,-121.792517,"The Plex (San Jose)"],[37.412292,-121.939845,"Venue (San Jose)"],[37.090806,-122.088535,"LDS - 9545 Love Creek Road, Ben Lamond - San Lorenzo"],[37.286303,-121.959978,"Seventh Day Adventist Church Campbell"],[37.286303,-121.959978,"Saniku Gakuin Japanese School (Campbell)"],[36.974289,-121.963552,"Whole Foods Capitola"],[37.318388,-122.029684,"Sterling Square (Cupertino)"],[37.322187,-122.030192,"Verona Condos (Cupertino)"],[37.012704,-121.582194,"LDS- 7999 Miller Avenue (Gilroy)"],[36.318263,-121.247381,"LDS - 1145 Oak Avenue (Greenfield)"],[36.836829,-121.401284,"LDS - 1670 Cienega Road (Hollister)"],[37.376282,-122.115474,"350 Second Street (Los Altos)"],[37.377105,-122.115525,"309 Second (Los Altos)"],[37.427195,-121.883629,"555 Apartments (Milpitas)"],[37.396362,-121.902886,"DC Glaziers Union (Milpitas)"],[36.585196,-121.915706,"LDS -1 Skyline Forest Drive (Monterey)"],[37.126408,-121.635388,"Cottage Green/Creek (Morgan Hill)"],[37.13784,-121.617982,"El Dorado HOA (Morgan Hill)"],[37.146418,-121.66199,"Cochrane Morgan Hill EAH"],[37.135929,-121.62046,"LDS - 1790 East Dunne Avenue (Morgan Hill)"],[37.147248,-121.660089,"Raising Cane's (Morgan Hill)"],[37.420947,-122.095643,"Costco Mountain View"],[37.401914,-122.051009,"Green Puddle- 605 Ellis (Mountain View)"],[37.408318,-122.150134,"3165 Porter (Palo Alto)"],[37.418169,-122.148176,"2625 Hanover (Palo Alto)"],[36.710924,-121.650769,"Regency Court (Salinas)"],[36.708099,-121.647106,"LDS - 255 East Alvin Drive (Salinas)"],[37.244946,-121.885017,"Parkvillas Peppertree (San Jose)"],[37.265132,-121.845662,"Carlton Senior Living San Jose"],[37.330054,-121.8132,"Flexcar 2198 Tully (San Jose)"],[37.314788,-121.854595,"Paseo Senter I (San Jose)"],[37.314709,-121.853489,"Paseo Senter II (San Jose)"],[37.358219,-121.90064,"1050 N. 5th Street (San Jose)"],[37.307992,-121.973208,"Saratoga Grove  - 4040 Williams Road -includes 1030 and 1040"],[37.3075,-121.973957,"Saratoga Grove  - 4060 Williams Road (San Jose)"],[37.305245,-121.973751,"Rancho Grove (San Jose)"],[37.305015,-121.973129,"Citron Place (San Jose)"],[37.306684,-121.973794,"Villa Rancho (San Jose)"],[37.345215,-121.996539,"The Laurelwood (Santa Clara)"],[36.984693,-122.033355,"Costco Santa Cruz"],[36.990272,-122.004174,"LDS - Capitola - 220 Elk Street, Santa Cruz"],[36.597589,-121.837313,"LDS -1024 Noche Buena Street (Seaside)"],[36.61714,-121.843843,"Tesla - 1901 Del Monte Blvd (Seaside)"],[37.375601,-122.011297,"Fortinet - Lump Sum (5 sites) (Sunnyvale)"],[37.39798,-122.031151,"St. Jude Medical - ABBOTT (Sunnyvale)"],[37.398798,-122.022744,"Borregas Court (Sunnyvale)"],[37.373566,-122.058819,"Sunrise of Sunnyvale"],[37.387104,-122.01019,"Sunnyvale High School"],[36.920685,-121.787796,"LDS  - 255 Holm Road, Watsonville"]];
+const NEW_BRANCH_JOBS=[[37.399231,-122.051934,"Google - MTV E475 - 475 Ellis (Mountain View)"],[37.425794,-122.097238,"Google - MTV BAYSH2598 - 2598 Bayshore (Mountain View)"],[37.407357,-122.076113,"Google - MTV 946- 946 Linda Vista (Mountain View)"],[37.427791,-122.098978,"Google - MTV 2700 - 2700 Garcia (Mountain View)"],[37.431796,-122.099704,"Google - MTV 1161 - 1161 San Antonio Rd (Mountain View)"],[37.428568,-122.099474,"Google - MTV 2644 - 2644-48 Bayshore (Mountain View)"],[37.431078,-122.099991,"Google - MTV 1157 - 1157 San Antonio Rd (Mountain View)"],[37.43096,-122.099178,"Google - MTV 2751 - 2751 Marine Way (Mountain View)"],[37.42864,-122.098525,"Google - MTV 2637 - 2637 Marine Way (Mountain View)"],[37.432491,-122.098124,"Google - MTV 2690 - 2690 Casey (Palo Alto)"],[37.431821,-122.10093,"Google - PAO 1129 - 1129 San Antonio (Palo Alto)"],[37.431095,-122.10209,"Google - PAO 1010 - 1010 Corporation Way (Palo Alto)"],[37.433399,-122.102737,"Google - PAO 1137 - 1137 San Antonio Rd (Palo Alto)"],[37.43227,-122.101452,"Google - PAO 1133 - 1133 San Antonio (Palo Alto)"],[37.432802,-122.10227,"Google - PAO 1135 - 1135 San Antonio Road (Palo Alto)"],[37.399706,-122.193014,"Ladera Park Professional Center (Portola Valley)"],[37.489947,-122.22808,"900 Veterans (Redwood City)"],[37.54347,-122.301461,"Station 1 - 2750 S Delaware (San Mateo)"],[37.541096,-122.298916,"Delaware Street Properties (San Mateo)"],[37.541394,-122.299706,"Bay Meadows Station 5 (San Mateo)"],[37.541096,-122.298916,"Bay Meadows Station 4 (San Mateo)"],[37.541394,-122.299706,"Bay Meadows Station 3 (San Mateo)"],[37.542411,-122.300377,"Bay Meadows Station 2 (San Mateo)"],[37.662493,-122.396253,"The Cove Oyster Point (South San Francisco)"],[37.656324,-122.390235,"Healthpeak Phase 1 (BM Dir combines phase 1 and 2) (South Sa"],[37.656324,-122.390235,"Healthpeak Phase 2 (South San Francisco)"],[37.656324,-122.390235,"Healthpeak Phase 3 (South San Francisco)"],[37.415643,-122.018076,"Google Caribbean US-SVL-CRBN100 (Sunnyvale)"],[37.408499,-122.011825,"Google US-SVL-CRSM1265 (Sunnyvale)"],[37.416322,-122.015639,"Google Caribbean - US-SVL-CRBN200 (Sunnyvale)"],[37.408075,-122.013139,"Google US-SVL-CRSM1249 (Sunnyvale)"],[37.407363,-122.012263,"Google US-SVL-CRSM1225 (Sunnyvale)"],[37.408669,-122.009754,"Google US-SVL-CRSM1240 (Sunnyvale)"],[37.409526,-122.009963,"Google US-SVL-CRSM1260 (Sunnyvale)"],[37.452816,-122.238011,"1700 Fernside Dr. - Woodside"],[37.67722,-122.466096,"Raising Cane's #941 (Colma)"],[37.463719,-122.15802,"68 Willow (Menlo Park)"],[37.452923,-122.183075,"611 Santa Cruz Ave. (Menlo Park)"],[37.476751,-122.199427,"3425 Edison Way/Orchard Project 7245 (Menlo Park)"],[37.4032,-122.19755,"Woodland School (Portola Valley)"],[37.494157,-122.227829,"San Mateo Credit Union  Convention Way (Redwood City)"],[37.634071,-122.39801,"Costco S San Francisco"],[37.627977,-122.426963,"Google - SBO 901 - 901 Cherry (San Bruno)"],[37.626903,-122.428259,"Google - SBO-1450 Bayhill - (San Bruno)"],[37.627884,-122.427473,"Google - SBO-1400 Bayhill - (San Bruno)"],[37.629241,-122.425663,"Google - SBO 1000 - 1000 Cherry (San Bruno)"],[37.62814,-122.425175,"Google - SBO 900 - 900 Cherry (San Bruno)"],[37.630124,-122.422491,"Google - SBO 1100 - 1100 Grundy (San Bruno)"],[37.626811,-122.427916,"Google - SBO-1500 Bayhill (San Bruno)"],[37.646008,-122.400269,"Google - SSF-UTAH 180 -180 Utah Avenue (South San Francisco)"],[37.590415,-122.337225,"Meta - BUR 101 (Burlingame)"],[37.590423,-122.335834,"Meta - BUR 102 (Burlingame)"],[37.589869,-122.336013,"Meta - BUR 103 (Burlingame)"],[37.589801,-122.337022,"Meta - BUR 105 (Burlingame)"],[37.589775,-122.336392,"Meta - BURP1 (Burlingame)"],[37.589133,-122.337156,"Meta - BUR 104 (Burlingame)"],[37.598602,-122.380662,"Meta - BURT01 (Burlingame)"],[37.484197,-122.147902,"Meta Classic Campus (Menlo Park)"],[37.485372,-122.177293,"Snowflake  - MPK 62 (Menlo Park)"],[37.485053,-122.176217,"Snowflake  - MPK 63 (Menlo Park)"],[37.479955,-122.169057,"Meta - MPK 24 - Chilco Campus (Menlo Park)"],[37.481793,-122.175106,"Moloco - 135 Commonwealth (Menlo Park)"],[37.481538,-122.168928,"Meta - MPK 29 - Chilco Campus (Menlo Park)"],[37.48085,-122.170346,"Meta - MPK 25 - Chilco Campus (Menlo Park)"],[37.481279,-122.170992,"Meta - MPK 26 - Chilco Campus (Menlo Park)"],[37.481768,-122.17008,"Meta - MPK 281 - Chilco Campus (Menlo Park)"],[37.485253,-122.178006,"Snowflake - Parking lot 1 (Menlo Park)"],[37.484482,-122.174912,"Snowflake - Parking lot 2 (Menlo Park)"],[37.482683,-122.170711,"Meta - MPK 282 - Chilco Campus (Menlo Park)"],[37.48285,-122.168755,"Meta - MPK 286 - Chilco Campus (Menlo Park)"],[37.482663,-122.16813,"Meta - MPK 287 - Chilco Campus (Menlo Park)"],[37.482107,-122.17102,"Meta - MPK280 - Chilco Campus (Menlo Park)"],[37.483099,-122.169499,"Meta - MPK 284 - Chilco Campus (Menlo Park)"],[37.483269,-122.170081,"Meta - MPK 283 - Chilco Campus (Menlo Park)"],[37.482487,-122.169933,"Meta - MPK 285 - Chilco Campus (Menlo Park)"],[37.488195,-122.207503,"Meta - RWC 104 - Chilway PM (Redwood City)"],[37.405759,-122.253796,"Mountain Home - 3000 Portola (Woodside)"],[37.421761,-122.090224,"Google - MTV 1965 - 1965 Charleston (Mountain View)"],[37.422553,-122.090507,"Google - MTV 1945 - 1945 Charleston (Mountain View)"],[37.420107,-122.084581,"Google - 1665 Charleston (Mountain View)"],[37.423885,-122.091641,"Google - MTV GWC1 - 2025 Garcia (Mountain View)"],[37.423163,-122.092484,"Google - MTV GWC3 - 1505 Salado (Mountain View)"],[37.423912,-122.092532,"Google - MTV GWC2 - 1501 Salado (Mountain View)"],[37.398179,-122.049372,"Google - MTV L441 - 441 Logue (Mountain View)"],[37.397481,-122.049459,"Google - MTV M800 - 800 Maude (Mountain View)"],[37.397788,-122.047478,"Google - MTV C450 - 450 Clyde (Mountain View)"],[37.397341,-122.047394,"Google - MTV C440 - 440 Clyde (Mountain View)"],[37.43043,-122.107199,"Google US-PAO-EM15 (Palo Alto)"],[37.428679,-122.107754,"Google US-PAO-EM925 (Palo Alto)"],[37.432344,-122.108181,"Google US-PAO-EM40 (Palo Alto)"],[37.429308,-122.108814,"Google US-PAO-EM76 (Palo Alto)"],[37.431907,-122.107412,"Google US-PAO-EM36 (Palo Alto)"],[37.430801,-122.107814,"Google US-PAO-EM25 (Palo Alto)"],[37.429089,-122.108323,"Google US-PAO-EM86 (Palo Alto)"],[37.431322,-122.106591,"Google US-PAO-EM20 (Palo Alto)"],[37.519129,-122.265988,"150 Industrial (San Carlos)"],[37.551776,-122.264059,"LDS - Foster City"],[37.448614,-122.192697,"LDS - Valparaiso - Alvarado Niles (Menlo Park)"],[37.527314,-122.5142,"LDS - Moss Beach"],[37.58488,-122.487047,"Kimco - Linda Mar #111150 (Pacifica)"],[37.63308,-122.475548,"LDS - Sharp Park (Pacifica)"],[37.53516,-122.237638,"Bridgeport HOA (Redwood City)"],[37.478904,-122.259816,"LDS - Edgewood (Redwood City)"],[37.634732,-122.42496,"LDS - San Bruno"],[37.634123,-122.423905,"LDS - Tongan Center (San Bruno)"],[37.550948,-122.291797,"One90 HOA (San Mateo)"],[37.530098,-122.306544,"LDS - San Mateo"],[37.447177,-122.209579,"Wang Maintenance (Atherton)"],[37.5233,-122.27661,"The Hayden Belmont"],[37.590048,-122.34299,"Hilton SF Airport (Burlingame)"],[37.590208,-122.34699,"Bayside Plaza (Burlingame)"],[37.591728,-122.368556,"Aerobay Office Center (Burlingame)"],[37.599643,-122.369553,"1633 Bayshore (Burlingame)"],[37.592278,-122.386172,"Oakmont of Burlingame"],[37.590473,-122.339601,"433 Airport Blvd (Burlingame)"],[37.59805,-122.368499,"Hinckley Warehouse (Burlingame)"],[37.577649,-122.351197,"1450 Chapin - DCL (Burlingame)"],[37.579282,-122.344443,"250 California (Burlingame)"],[37.503372,-122.249272,"930 Brittan - DLC (Burlingame)"],[37.578666,-122.345377,"240 Lorton - DCL (Burlingame)"],[37.578715,-122.344975,"228 Lorton (Burlingame)"],[37.579059,-122.344513,"225 California - DCL (Burlingame)"],[37.682616,-122.465179,"La Scala HOA (Colma)"],[37.670685,-122.463354,"Tesla - NA US CA Serramonte 1500 Collins Avenue - Colma"],[37.669463,-122.464645,"Serramonte HOA (Daly City)"],[37.689504,-122.466494,"22 San Pedro - Daly City"],[37.55903,-122.276252,"Visa (Foster City)"],[37.560837,-122.271035,"1065 E Hillsdale (Foster City)"],[37.419842,-122.204134,"SLAC (Menlo Park)"],[37.458023,-122.172208,"525/535/545 Middlefield (Menlo Park)"],[37.429093,-122.204475,"Phillips Brook School (Menlo Park)"],[37.419842,-122.204134,"SLAC Quads (Menlo Park)"],[37.460697,-122.1613,"Willow Wood HOA (Menlo Park)"],[37.39061,-122.049119,"Mountain View Research Park - Boston Prop"],[37.399303,-122.107782,"2440 W El Camino Real - Boston Prop (Mountain View)"],[37.390597,-122.051135,"453 Ravendale - Boston Prop (Mountain View)"],[37.453756,-122.261064,"Shinnyoen HQ (Redwood City)"],[37.525879,-122.263057,"San Mateo Office of Education - 101 Twin Dolphin Drive (Redw"],[37.485642,-122.22955,"889 Winslow Street (Redwood City)"],[37.510731,-122.209013,"Sims Metal Management (Redwood City)"],[37.636835,-122.420181,"Shops at Tanforan (San Bruno)"],[37.631963,-122.426356,"SMCOE  Palos Verdes - 1290 Commodore Drive (San Bruno)"],[37.50479,-122.261966,"Pacific Hacienda HOA (San Carlos)"],[37.503226,-122.250002,"1030 Brittain (San Carlos)"],[37.776501,-122.388143,"China Basin Park - Park, Streets, SIP North, SIP Berms (San "],[37.808673,-122.409821,"Pier 39 (San Francisco)"],[37.797426,-122.398179,"Embarcadero Square (San Francisco)"],[37.791047,-122.400047,"Mission Rock Parcel B (San Francisco)"],[37.775773,-122.388653,"Visa World Headquarters - San Francisco"],[37.771387,-122.394445,"Arden Owners Association (San Francisco)"],[37.612892,-122.39401,"Grand Hyatt at SFO (San Francisco)"],[37.775918,-122.389324,"Canyon Apartments (San Francisco)"],[37.744293,-122.437975,"Delphine on Diamond (San Francisco)"],[37.773306,-122.420906,"The Brady (San Francisco)"],[37.78614,-122.40257,"706 Mission Street (San Francisco)"],[37.769733,-122.401867,"1 De Haro - San Francisco"],[37.786631,-122.398289,"LinkedIn San Francisco Campus - National Accounts"],[37.792302,-122.411464,"Pacific Union Club (San Francisco)"],[37.775173,-122.388612,"Verde Apartments - Greystar (San Francisco)"],[37.785106,-122.39877,"50 Hawthorne/680 Folsom/690 Folsom - Boston Prop (San Franci"],[37.790694,-122.391476,"Gap Inc.  2 Folsom (San Francisco)"],[37.772354,-122.390975,"Strata at Mission Bay (San Francisco)"],[37.806587,-122.418013,"Hotel Caza (San Francisco)"],[37.76979,-122.409876,"1201 Bryant St (San Francisco)"],[37.775758,-122.389691,"Mission Rock Parcel A (San Francisco)"],[37.78651,-122.392225,"401 Harrison (San Francisco)"],[37.805655,-122.416468,"Marriott Pulse - 4 mh (San Francisco)"],[37.782784,-122.391385,"270 Brannan (San Francisco)"],[37.788878,-122.398134,"535 Mission Street - Boston Prop (San Francisco)"],[37.789556,-122.396905,"Salesforce Tower - Boston Prop (San Francisco)"],[37.758851,-122.390931,"953 Indiana - DCL (San Francisco)"],[37.775253,-122.388551,"365 Toni Stone Crossing (Floor 3) Tishman Speyr (San Francis"],[37.775758,-122.389691,"Mission Rock Parcel G planter (San Francisco)"],[37.543102,-122.285302,"San Mateo Office Plaza (was 3130 La Selva)"],[37.512782,-122.333448,"35 Tower Road - San Mateo"],[37.514785,-122.334312,"SMCOE  61-69 Tower Rd. (San Mateo)"],[37.643085,-122.454686,"Westborough Professional Center (South San Francisco)"],[37.642958,-122.411392,"1305 San Mateo Avenue (South San Francisco)"],[37.5289,-122.257718,"350 Marine Parkway (Redwood City)"]];
+const OLD_BASE={lat:37.420834,lng:-121.884064,name:'1250 Ames Ave, Milpitas — Old branch'};
+const NEW_BASE={lat:37.596600,lng:-122.361200,name:'825 Mahler Rd, Burlingame — New branch'};
+function loadPreset(base, jobs){
+  state.base=null; state.jobs=[]; clearResult();
+  state.base={...base};
+  for(const [la,ln,nm] of jobs){ state.jobs.push({id:uid++,lat:la,lng:ln,name:nm}); }
+  renderPoints(); drawMarkers(); fitMap();
+}
+$('loadOld').onclick=()=>loadPreset(OLD_BASE, OLD_BRANCH_JOBS);
+$('loadNew').onclick=()=>loadPreset(NEW_BASE, NEW_BRANCH_JOBS);
+$('example').onclick=()=>loadPreset(OLD_BASE, [...OLD_BRANCH_JOBS, ...NEW_BRANCH_JOBS]);
+
+// ---- Connection test ----
+async function testConnection(){
+  const b=$('frameBanner'); b.style.display='block'; b.className='banner';
+  b.innerHTML='Checking address lookup…';
+  let nomOk=false;
+  try{
+    const r=await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&q=Oakland');
+    const j=await r.json(); nomOk = Array.isArray(j) && j.length>0;
+  }catch(e){}
+  if(nomOk){
+    b.className='banner ok';
+    b.innerHTML='<b>Address lookup works.</b> Optimization runs entirely offline, so you\u2019re all set.';
+  } else {
+    b.className='banner';
+    const reason = IN_FRAME
+      ? 'You\u2019re in a preview pane, which blocks the address service. Optimization still works — or open the file in its own browser tab for address search.'
+      : 'The address service didn\u2019t respond (check your connection or ad-blocker). You can still add stops by coordinates or map clicks — optimization is fully offline.';
+    b.innerHTML='<b>Address lookup unavailable.</b> '+reason;
+  }
+}
+$('conntest').onclick=testConnection;
+if(IN_FRAME){ $('frameBanner').style.display='block'; }
+
+renderPoints();
+</script>
+</body>
+</html>
