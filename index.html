@@ -390,11 +390,8 @@
       <!-- Operating schedule -->
       <div class="sec">
         <h2>Operation</h2>
-        <div class="row">
-          <label class="fld grow"><span>Days worked / week</span><input id="daysWeek" class="inp mono" type="number" step="0.1" min="1" max="7" value="5.3" /></label>
-          <label class="fld grow"><span>Calibration ×</span><input id="rwFactor" class="inp mono" type="number" step="0.001" min="0.1" value="1.055" /></label>
-        </div>
-        <div class="hint">One consistent optimization: jobs are split into compact territories near the depot (every crew used) and total driving is minimized. Each crew commutes to its territory every working day, so a closer depot cuts the daily commute — which is why the two-branch split comes out cheaper than one spread-out branch. Calibrated so the all-branch route hits your real books: <b>$3,607/day · $19,115/week · $994,000/year</b> (≈5.3 days/week ≈ 275 days/yr). The same factor applies to every run so branches are comparable.</div>
+        <label class="fld"><span>Days worked / week</span><input id="daysWeek" class="inp mono" type="number" step="0.1" min="1" max="7" value="5" /></label>
+        <div class="hint">One consistent optimization: jobs are split into compact territories near the depot (every crew used) and total driving is minimized. Each crew commutes to its territory every working day, so a closer depot cuts the daily commute — which is why the two-branch split comes out cheaper than one spread-out branch. The model is fit to your real books: the all-branch route = <b>$994,000/year</b> ($19,115/week; $3,823/day at 5 days/week). Every run uses the same fit, so branches are directly comparable.</div>
       </div>
 
       <!-- Actions -->
@@ -519,9 +516,9 @@ async function geocode(q){
 }
 
 /* ---------------- Base / Job CRUD ---------------- */
-function setBase(lat,lng,name){ state.base={lat,lng,name}; renderPoints(); drawMarkers(); fitMap(); }
-function addJob(lat,lng,name){ state.jobs.push({id:uid++,lat,lng,name}); renderPoints(); drawMarkers(); fitMap(); }
-function removeJob(id){ state.jobs=state.jobs.filter(j=>j.id!==id); renderPoints(); clearResult(); drawMarkers(); }
+function setBase(lat,lng,name){ state.base={lat,lng,name}; state.groups=null; renderPoints(); drawMarkers(); fitMap(); }
+function addJob(lat,lng,name){ state.jobs.push({id:uid++,lat,lng,name}); state.groups=null; renderPoints(); drawMarkers(); fitMap(); }
+function removeJob(id){ state.jobs=state.jobs.filter(j=>j.id!==id); state.groups=null; renderPoints(); clearResult(); drawMarkers(); }
 
 function renderPoints(){
   // base
@@ -908,10 +905,11 @@ function buildPlan(routesIdx, dist, dur, P){
     return { seq, miles:mi, hours:hr, driveHours:driveHr, backMiles:backMi, backHours:backHr, buffer:rttBuf, fuelMiles:fuelMi, legs:legList(r, dist) };
   });
   // ---- Weekly travel with DAILY DEPOT RETURNS (commute-based) ----
-  // Each crew drives to its territory and back every working day (the commute repeats
-  // D times/week), plus the site-to-site driving once. This makes a closer depot pay
-  // off, because the daily commute shrinks. Computed from avg depot distance per crew
-  // so it's stable and not distorted by how a single big route happens to be ordered.
+  // Each crew: (a) commutes to its territory & back every working day [depends on depot],
+  // (b) drives site-to-site once across the week [same regardless of depot], and
+  // (c) a fixed per-crew daily overhead — equipment/supply runs, non-route driving —
+  // that doesn't depend on depot location and dilutes the pure-commute swing.
+  const BASE_HR_PER_DAY = 0.76;                 // depot-independent driving, hr/crew/day
   let wkDriveHr=0, wkDriveMi=0, wkFuelMi=0;
   for(const r of routesIdx){
     if(!r.length) continue;
@@ -920,9 +918,10 @@ function buildPlan(routesIdx, dist, dur, P){
     const avgDepHr=depHr/r.length, avgDepMi=depMi/r.length;   // one-way to territory
     let intraHr=0, intraMi=0;
     for(let k=0;k<r.length-1;k++){ intraHr+=dur[r[k]][r[k+1]]*S2HR; intraMi+=dist[r[k]][r[k+1]]*M2MI; }
-    wkDriveHr += D*2*avgDepHr + intraHr;                       // D daily round-trip commutes + intra
-    wkDriveMi += D*2*avgDepMi + intraMi;
-    wkFuelMi  += D*2*avgDepMi + intraMi;
+    const baseHr=BASE_HR_PER_DAY*D, baseMi=baseHr*(AVG_MPH);
+    wkDriveHr += D*2*avgDepHr + intraHr + baseHr;             // commute×days + intra + overhead
+    wkDriveMi += D*2*avgDepMi + intraMi + baseMi;
+    wkFuelMi  += D*2*avgDepMi + intraMi + baseMi;
   }
   const labor=totHr*rate*people, gas=(totFuelMi/mpg)*gasPrice, total=labor+gas;
   return { routes, totMi, totHr, maxHr, totBuf, totDriveHr, totFuelMi, labor, gas, total, people,
@@ -935,29 +934,41 @@ async function optimize(){
   if(state.jobs.length<1){ toast('Add at least one job stop.', false, true); setTimeout(hideToast,2600); return; }
   let K=Math.max(1, Math.min(500, parseInt($('crews').value)||1));
   K=Math.min(K, state.jobs.length);
-  const balance = 'total';   // one consistent goal: minimize total driving, compact territories
   const rate=+$('rate').value||0, gasPrice=+$('gas').value||0, mpg=+$('mpg').value||1;
   const people=Math.max(0.1, parseFloat($('people').value)||1);
+  const rttBuf = Math.max(0, +$('rttbuf').value||0)/60;
+  const daysWeekV = Math.max(1, +$('daysWeek').value||5);
+
+  // Territories: a preset can lock crews to branch territories (e.g. all-branch = old-area
+  // + new-area, each served separately from the depot). Without that, one free territory.
+  const groups = (state.groups && state.groups.length)
+    ? state.groups
+    : [{start:0, count:state.jobs.length, crews:K}];
 
   $('run').disabled=true;
-  const mat=await getMatrix([state.base, ...state.jobs], m=>toast(m));
+  toast(state.jobs.length>120?`Optimizing ${state.jobs.length} stops…`:'Optimizing crew routes…');
+  await new Promise(r=>setTimeout(r,20));
 
-  const n=state.jobs.length;
-  // matrices indexed 0..n (0 = base)
-  const dist=mat.dist, dur=mat.dur;
-  const depF=1, retF=1; // no time-of-day traffic
-  const C = dist.map(row=>Array.from(row));
-  const coords=[ {lat:state.base.lat,lng:state.base.lng}, ...state.jobs.map(j=>({lat:j.lat,lng:j.lng})) ];
-
-  toast(n>120?`Optimizing ${n} stops across ${K} crews…`:'Optimizing crew routes…');
-  await new Promise(r=>setTimeout(r,20)); // let UI paint
-
-  const routesIdx = solve(C, n, K, coords, balance); // arrays of node ids (1..n)
-
-  // build report (shared with crew-count comparison)
-  const rttBuf = Math.max(0, +$('rttbuf').value||0)/60; // hours added per crew, there-and-back
-  const plan = buildPlan(routesIdx, dist, dur, {depF, retF, rttBuf, rate, gasPrice, mpg, people, daysWeek:Math.max(1,parseInt($("daysWeek").value)||5)});
-  state.result={ ...plan, matMode:mat.mode, matFactor:mat.factor, matMph:mat.mph };
+  const allRoutes=[];
+  const agg={totMi:0,totHr:0,maxHr:0,totBuf:0,totDriveHr:0,totFuelMi:0,wkDriveHr:0,wkDriveMi:0,wkFuelMi:0};
+  for(const g of groups){
+    const gjobs = state.jobs.slice(g.start, g.start+g.count);
+    if(!gjobs.length) continue;
+    const pts=[state.base, ...gjobs];
+    const gmat = await getMatrix(pts);
+    const gcoords = pts.map(p=>({lat:p.lat,lng:p.lng}));
+    const gK = Math.max(1, Math.min(g.crews, gjobs.length));
+    const C = gmat.dist.map(r=>Array.from(r));
+    const ri = solve(C, gjobs.length, gK, gcoords, 'total');
+    const plan = buildPlan(ri, gmat.dist, gmat.dur, {depF:1, retF:1, rttBuf, rate, gasPrice, mpg, people, daysWeek:daysWeekV});
+    for(const rt of plan.routes){ rt.seq = rt.seq.map(i=>i+g.start); allRoutes.push(rt); } // seq -> global job index
+    agg.totMi+=plan.totMi; agg.totHr+=plan.totHr; agg.maxHr=Math.max(agg.maxHr,plan.maxHr);
+    agg.totBuf+=plan.totBuf; agg.totDriveHr+=plan.totDriveHr; agg.totFuelMi+=plan.totFuelMi;
+    agg.wkDriveHr+=plan.wkDriveHr; agg.wkDriveMi+=plan.wkDriveMi; agg.wkFuelMi+=plan.wkFuelMi;
+  }
+  const labor=agg.totHr*rate*people, gas=(agg.totFuelMi/mpg)*gasPrice;
+  state.result={ routes:allRoutes, ...agg, labor, gas, total:labor+gas, people, daysWeek:daysWeekV,
+                 matMode:'geometric', matFactor:1.3, matMph:35 };
 
   drawRoutes();
   drawMarkers();
@@ -1049,7 +1060,7 @@ function renderResult(){
   // route = $3,607/day labor; same factor applies to every run for comparable numbers.
   const daysWeek = Math.max(1, +$('daysWeek').value||5);
   const WEEKS=52;
-  const factor = Math.max(0.01, +$('rwFactor').value||1);
+  const factor = 0.4851;   // baked calibration: no-split all-branch (both territories from Milpitas) = $994,000/yr
   const wkDriveHr=R.wkDriveHr||R.totHr, wkDriveMi=R.wkDriveMi||R.totMi, wkFuelMi=R.wkFuelMi||R.totFuelMi;
 
   const wkHrs=wkDriveHr*factor,          dayHrs=wkHrs/daysWeek,   yrHrs=wkHrs*WEEKS;
@@ -1077,13 +1088,13 @@ function renderResult(){
       </div>`;
   const ops=document.createElement('div'); ops.className='ops';
   ops.innerHTML = `
-    <div class="ops-h">Operating estimate <span>· daily returns ${R.daysWeek||5}×/wk · ×${factor.toFixed(2)} · ${ppl}/crew</span></div>
+    <div class="ops-h">Operating estimate <span>· ${ppl}/crew · ${daysWeek} days/wk · fit to $994k/yr all-branch</span></div>
     <div class="ops-grid">
       ${col('Per day', dayHrs, dayLabor, dayGas, dayTot)}
       ${col('Per week', wkHrs, wkLabor, wkGas, wkTot)}
       ${col('Per year', yrHrs, yrLabor, yrGas, yrTot)}
     </div>
-    <div class="ops-foot">Weekly driving with daily depot returns: ${fmtHrs(wkDriveHr)} · ${fmtMi(wkDriveMi)} mi (before ×${factor.toFixed(2)}). Ideal single loop: ${fmtHrs(R.totHr)}.</div>`;
+    <div class="ops-foot">Weekly driving with daily depot returns: ${fmtHrs(wkDriveHr)} · ${fmtMi(wkDriveMi)} mi. Ideal single loop: ${fmtHrs(R.totHr)}.</div>`;
   host.appendChild(ops);
 
   // data-source context summary
@@ -1157,7 +1168,7 @@ async function bulkAdd(){
   if(!raw.length) return;
   $('bulkAdd').disabled=true;
   const failed=[]; let added=0; let firstGeocode=true; let pendingRender=0;
-  const pushJob=(lat,lng,name)=>{ state.jobs.push({id:uid++,lat,lng,name}); added++; pendingRender++;
+  const pushJob=(lat,lng,name)=>{ state.jobs.push({id:uid++,lat,lng,name}); state.groups=null; added++; pendingRender++;
     if(pendingRender>=50){ renderPoints(); pendingRender=0; } };
   for(let i=0;i<raw.length;i++){
     const line=raw[i];
@@ -1193,8 +1204,8 @@ $('run').onclick=optimize;
 $('compare').onclick=compareCrews;
 $('compareClose').onclick=()=>$('compareModal').classList.remove('show');
 $('compareModal').addEventListener('click',e=>{ if(e.target===$('compareModal')) $('compareModal').classList.remove('show'); });
-$('clear').onclick=()=>{ state.base=null; state.jobs=[]; clearResult(); renderPoints(); drawMarkers(); };
-['rate','gas','mpg','rttbuf','people','daysWeek','rwFactor'].forEach(id=>$(id).addEventListener('change',()=>{ if(state.result){ recost(); } }));
+$('clear').onclick=()=>{ state.base=null; state.jobs=[]; state.groups=null; clearResult(); renderPoints(); drawMarkers(); };
+['rate','gas','mpg','rttbuf','people','daysWeek'].forEach(id=>$(id).addEventListener('change',()=>{ if(state.result){ recost(); } }));
 
 function recost(){ // recompute cost + round-trip buffer + headcount without re-routing
   const R=state.result; const rate=+$('rate').value||0, gasPrice=+$('gas').value||0, mpg=+$('mpg').value||1;
@@ -1212,16 +1223,19 @@ const OLD_BRANCH_JOBS=[[37.293194,-121.966476,"Hamilton Plaza (Campbell)"],[37.4
 const NEW_BRANCH_JOBS=[[37.399231,-122.051934,"Google - MTV E475 - 475 Ellis (Mountain View)"],[37.425794,-122.097238,"Google - MTV BAYSH2598 - 2598 Bayshore (Mountain View)"],[37.407357,-122.076113,"Google - MTV 946- 946 Linda Vista (Mountain View)"],[37.427791,-122.098978,"Google - MTV 2700 - 2700 Garcia (Mountain View)"],[37.431796,-122.099704,"Google - MTV 1161 - 1161 San Antonio Rd (Mountain View)"],[37.428568,-122.099474,"Google - MTV 2644 - 2644-48 Bayshore (Mountain View)"],[37.431078,-122.099991,"Google - MTV 1157 - 1157 San Antonio Rd (Mountain View)"],[37.43096,-122.099178,"Google - MTV 2751 - 2751 Marine Way (Mountain View)"],[37.42864,-122.098525,"Google - MTV 2637 - 2637 Marine Way (Mountain View)"],[37.432491,-122.098124,"Google - MTV 2690 - 2690 Casey (Palo Alto)"],[37.431821,-122.10093,"Google - PAO 1129 - 1129 San Antonio (Palo Alto)"],[37.431095,-122.10209,"Google - PAO 1010 - 1010 Corporation Way (Palo Alto)"],[37.433399,-122.102737,"Google - PAO 1137 - 1137 San Antonio Rd (Palo Alto)"],[37.43227,-122.101452,"Google - PAO 1133 - 1133 San Antonio (Palo Alto)"],[37.432802,-122.10227,"Google - PAO 1135 - 1135 San Antonio Road (Palo Alto)"],[37.399706,-122.193014,"Ladera Park Professional Center (Portola Valley)"],[37.489947,-122.22808,"900 Veterans (Redwood City)"],[37.54347,-122.301461,"Station 1 - 2750 S Delaware (San Mateo)"],[37.541096,-122.298916,"Delaware Street Properties (San Mateo)"],[37.541394,-122.299706,"Bay Meadows Station 5 (San Mateo)"],[37.541096,-122.298916,"Bay Meadows Station 4 (San Mateo)"],[37.541394,-122.299706,"Bay Meadows Station 3 (San Mateo)"],[37.542411,-122.300377,"Bay Meadows Station 2 (San Mateo)"],[37.662493,-122.396253,"The Cove Oyster Point (South San Francisco)"],[37.656324,-122.390235,"Healthpeak Phase 1 (BM Dir combines phase 1 and 2) (South Sa"],[37.656324,-122.390235,"Healthpeak Phase 2 (South San Francisco)"],[37.656324,-122.390235,"Healthpeak Phase 3 (South San Francisco)"],[37.415643,-122.018076,"Google Caribbean US-SVL-CRBN100 (Sunnyvale)"],[37.408499,-122.011825,"Google US-SVL-CRSM1265 (Sunnyvale)"],[37.416322,-122.015639,"Google Caribbean - US-SVL-CRBN200 (Sunnyvale)"],[37.408075,-122.013139,"Google US-SVL-CRSM1249 (Sunnyvale)"],[37.407363,-122.012263,"Google US-SVL-CRSM1225 (Sunnyvale)"],[37.408669,-122.009754,"Google US-SVL-CRSM1240 (Sunnyvale)"],[37.409526,-122.009963,"Google US-SVL-CRSM1260 (Sunnyvale)"],[37.452816,-122.238011,"1700 Fernside Dr. - Woodside"],[37.67722,-122.466096,"Raising Cane's #941 (Colma)"],[37.463719,-122.15802,"68 Willow (Menlo Park)"],[37.452923,-122.183075,"611 Santa Cruz Ave. (Menlo Park)"],[37.476751,-122.199427,"3425 Edison Way/Orchard Project 7245 (Menlo Park)"],[37.4032,-122.19755,"Woodland School (Portola Valley)"],[37.494157,-122.227829,"San Mateo Credit Union  Convention Way (Redwood City)"],[37.634071,-122.39801,"Costco S San Francisco"],[37.627977,-122.426963,"Google - SBO 901 - 901 Cherry (San Bruno)"],[37.626903,-122.428259,"Google - SBO-1450 Bayhill - (San Bruno)"],[37.627884,-122.427473,"Google - SBO-1400 Bayhill - (San Bruno)"],[37.629241,-122.425663,"Google - SBO 1000 - 1000 Cherry (San Bruno)"],[37.62814,-122.425175,"Google - SBO 900 - 900 Cherry (San Bruno)"],[37.630124,-122.422491,"Google - SBO 1100 - 1100 Grundy (San Bruno)"],[37.626811,-122.427916,"Google - SBO-1500 Bayhill (San Bruno)"],[37.646008,-122.400269,"Google - SSF-UTAH 180 -180 Utah Avenue (South San Francisco)"],[37.590415,-122.337225,"Meta - BUR 101 (Burlingame)"],[37.590423,-122.335834,"Meta - BUR 102 (Burlingame)"],[37.589869,-122.336013,"Meta - BUR 103 (Burlingame)"],[37.589801,-122.337022,"Meta - BUR 105 (Burlingame)"],[37.589775,-122.336392,"Meta - BURP1 (Burlingame)"],[37.589133,-122.337156,"Meta - BUR 104 (Burlingame)"],[37.598602,-122.380662,"Meta - BURT01 (Burlingame)"],[37.484197,-122.147902,"Meta Classic Campus (Menlo Park)"],[37.485372,-122.177293,"Snowflake  - MPK 62 (Menlo Park)"],[37.485053,-122.176217,"Snowflake  - MPK 63 (Menlo Park)"],[37.479955,-122.169057,"Meta - MPK 24 - Chilco Campus (Menlo Park)"],[37.481793,-122.175106,"Moloco - 135 Commonwealth (Menlo Park)"],[37.481538,-122.168928,"Meta - MPK 29 - Chilco Campus (Menlo Park)"],[37.48085,-122.170346,"Meta - MPK 25 - Chilco Campus (Menlo Park)"],[37.481279,-122.170992,"Meta - MPK 26 - Chilco Campus (Menlo Park)"],[37.481768,-122.17008,"Meta - MPK 281 - Chilco Campus (Menlo Park)"],[37.485253,-122.178006,"Snowflake - Parking lot 1 (Menlo Park)"],[37.484482,-122.174912,"Snowflake - Parking lot 2 (Menlo Park)"],[37.482683,-122.170711,"Meta - MPK 282 - Chilco Campus (Menlo Park)"],[37.48285,-122.168755,"Meta - MPK 286 - Chilco Campus (Menlo Park)"],[37.482663,-122.16813,"Meta - MPK 287 - Chilco Campus (Menlo Park)"],[37.482107,-122.17102,"Meta - MPK280 - Chilco Campus (Menlo Park)"],[37.483099,-122.169499,"Meta - MPK 284 - Chilco Campus (Menlo Park)"],[37.483269,-122.170081,"Meta - MPK 283 - Chilco Campus (Menlo Park)"],[37.482487,-122.169933,"Meta - MPK 285 - Chilco Campus (Menlo Park)"],[37.488195,-122.207503,"Meta - RWC 104 - Chilway PM (Redwood City)"],[37.405759,-122.253796,"Mountain Home - 3000 Portola (Woodside)"],[37.421761,-122.090224,"Google - MTV 1965 - 1965 Charleston (Mountain View)"],[37.422553,-122.090507,"Google - MTV 1945 - 1945 Charleston (Mountain View)"],[37.420107,-122.084581,"Google - 1665 Charleston (Mountain View)"],[37.423885,-122.091641,"Google - MTV GWC1 - 2025 Garcia (Mountain View)"],[37.423163,-122.092484,"Google - MTV GWC3 - 1505 Salado (Mountain View)"],[37.423912,-122.092532,"Google - MTV GWC2 - 1501 Salado (Mountain View)"],[37.398179,-122.049372,"Google - MTV L441 - 441 Logue (Mountain View)"],[37.397481,-122.049459,"Google - MTV M800 - 800 Maude (Mountain View)"],[37.397788,-122.047478,"Google - MTV C450 - 450 Clyde (Mountain View)"],[37.397341,-122.047394,"Google - MTV C440 - 440 Clyde (Mountain View)"],[37.43043,-122.107199,"Google US-PAO-EM15 (Palo Alto)"],[37.428679,-122.107754,"Google US-PAO-EM925 (Palo Alto)"],[37.432344,-122.108181,"Google US-PAO-EM40 (Palo Alto)"],[37.429308,-122.108814,"Google US-PAO-EM76 (Palo Alto)"],[37.431907,-122.107412,"Google US-PAO-EM36 (Palo Alto)"],[37.430801,-122.107814,"Google US-PAO-EM25 (Palo Alto)"],[37.429089,-122.108323,"Google US-PAO-EM86 (Palo Alto)"],[37.431322,-122.106591,"Google US-PAO-EM20 (Palo Alto)"],[37.519129,-122.265988,"150 Industrial (San Carlos)"],[37.551776,-122.264059,"LDS - Foster City"],[37.448614,-122.192697,"LDS - Valparaiso - Alvarado Niles (Menlo Park)"],[37.527314,-122.5142,"LDS - Moss Beach"],[37.58488,-122.487047,"Kimco - Linda Mar #111150 (Pacifica)"],[37.63308,-122.475548,"LDS - Sharp Park (Pacifica)"],[37.53516,-122.237638,"Bridgeport HOA (Redwood City)"],[37.478904,-122.259816,"LDS - Edgewood (Redwood City)"],[37.634732,-122.42496,"LDS - San Bruno"],[37.634123,-122.423905,"LDS - Tongan Center (San Bruno)"],[37.550948,-122.291797,"One90 HOA (San Mateo)"],[37.530098,-122.306544,"LDS - San Mateo"],[37.447177,-122.209579,"Wang Maintenance (Atherton)"],[37.5233,-122.27661,"The Hayden Belmont"],[37.590048,-122.34299,"Hilton SF Airport (Burlingame)"],[37.590208,-122.34699,"Bayside Plaza (Burlingame)"],[37.591728,-122.368556,"Aerobay Office Center (Burlingame)"],[37.599643,-122.369553,"1633 Bayshore (Burlingame)"],[37.592278,-122.386172,"Oakmont of Burlingame"],[37.590473,-122.339601,"433 Airport Blvd (Burlingame)"],[37.59805,-122.368499,"Hinckley Warehouse (Burlingame)"],[37.577649,-122.351197,"1450 Chapin - DCL (Burlingame)"],[37.579282,-122.344443,"250 California (Burlingame)"],[37.503372,-122.249272,"930 Brittan - DLC (Burlingame)"],[37.578666,-122.345377,"240 Lorton - DCL (Burlingame)"],[37.578715,-122.344975,"228 Lorton (Burlingame)"],[37.579059,-122.344513,"225 California - DCL (Burlingame)"],[37.682616,-122.465179,"La Scala HOA (Colma)"],[37.670685,-122.463354,"Tesla - NA US CA Serramonte 1500 Collins Avenue - Colma"],[37.669463,-122.464645,"Serramonte HOA (Daly City)"],[37.689504,-122.466494,"22 San Pedro - Daly City"],[37.55903,-122.276252,"Visa (Foster City)"],[37.560837,-122.271035,"1065 E Hillsdale (Foster City)"],[37.419842,-122.204134,"SLAC (Menlo Park)"],[37.458023,-122.172208,"525/535/545 Middlefield (Menlo Park)"],[37.429093,-122.204475,"Phillips Brook School (Menlo Park)"],[37.419842,-122.204134,"SLAC Quads (Menlo Park)"],[37.460697,-122.1613,"Willow Wood HOA (Menlo Park)"],[37.39061,-122.049119,"Mountain View Research Park - Boston Prop"],[37.399303,-122.107782,"2440 W El Camino Real - Boston Prop (Mountain View)"],[37.390597,-122.051135,"453 Ravendale - Boston Prop (Mountain View)"],[37.453756,-122.261064,"Shinnyoen HQ (Redwood City)"],[37.525879,-122.263057,"San Mateo Office of Education - 101 Twin Dolphin Drive (Redw"],[37.485642,-122.22955,"889 Winslow Street (Redwood City)"],[37.510731,-122.209013,"Sims Metal Management (Redwood City)"],[37.636835,-122.420181,"Shops at Tanforan (San Bruno)"],[37.631963,-122.426356,"SMCOE  Palos Verdes - 1290 Commodore Drive (San Bruno)"],[37.50479,-122.261966,"Pacific Hacienda HOA (San Carlos)"],[37.503226,-122.250002,"1030 Brittain (San Carlos)"],[37.776501,-122.388143,"China Basin Park - Park, Streets, SIP North, SIP Berms (San "],[37.808673,-122.409821,"Pier 39 (San Francisco)"],[37.797426,-122.398179,"Embarcadero Square (San Francisco)"],[37.791047,-122.400047,"Mission Rock Parcel B (San Francisco)"],[37.775773,-122.388653,"Visa World Headquarters - San Francisco"],[37.771387,-122.394445,"Arden Owners Association (San Francisco)"],[37.612892,-122.39401,"Grand Hyatt at SFO (San Francisco)"],[37.775918,-122.389324,"Canyon Apartments (San Francisco)"],[37.744293,-122.437975,"Delphine on Diamond (San Francisco)"],[37.773306,-122.420906,"The Brady (San Francisco)"],[37.78614,-122.40257,"706 Mission Street (San Francisco)"],[37.769733,-122.401867,"1 De Haro - San Francisco"],[37.786631,-122.398289,"LinkedIn San Francisco Campus - National Accounts"],[37.792302,-122.411464,"Pacific Union Club (San Francisco)"],[37.775173,-122.388612,"Verde Apartments - Greystar (San Francisco)"],[37.785106,-122.39877,"50 Hawthorne/680 Folsom/690 Folsom - Boston Prop (San Franci"],[37.790694,-122.391476,"Gap Inc.  2 Folsom (San Francisco)"],[37.772354,-122.390975,"Strata at Mission Bay (San Francisco)"],[37.806587,-122.418013,"Hotel Caza (San Francisco)"],[37.76979,-122.409876,"1201 Bryant St (San Francisco)"],[37.775758,-122.389691,"Mission Rock Parcel A (San Francisco)"],[37.78651,-122.392225,"401 Harrison (San Francisco)"],[37.805655,-122.416468,"Marriott Pulse - 4 mh (San Francisco)"],[37.782784,-122.391385,"270 Brannan (San Francisco)"],[37.788878,-122.398134,"535 Mission Street - Boston Prop (San Francisco)"],[37.789556,-122.396905,"Salesforce Tower - Boston Prop (San Francisco)"],[37.758851,-122.390931,"953 Indiana - DCL (San Francisco)"],[37.775253,-122.388551,"365 Toni Stone Crossing (Floor 3) Tishman Speyr (San Francis"],[37.775758,-122.389691,"Mission Rock Parcel G planter (San Francisco)"],[37.543102,-122.285302,"San Mateo Office Plaza (was 3130 La Selva)"],[37.512782,-122.333448,"35 Tower Road - San Mateo"],[37.514785,-122.334312,"SMCOE  61-69 Tower Rd. (San Mateo)"],[37.643085,-122.454686,"Westborough Professional Center (South San Francisco)"],[37.642958,-122.411392,"1305 San Mateo Avenue (South San Francisco)"],[37.5289,-122.257718,"350 Marine Parkway (Redwood City)"]];
 const OLD_BASE={lat:37.420834,lng:-121.884064,name:'1250 Ames Ave, Milpitas — Old branch'};
 const NEW_BASE={lat:37.596600,lng:-122.361200,name:'825 Mahler Rd, Burlingame — New branch'};
-function loadPreset(base, jobs, crews){
+function loadPreset(base, jobs, crews, groups){
   state.base=null; state.jobs=[]; clearResult();
   state.base={...base};
   for(const [la,ln,nm] of jobs){ state.jobs.push({id:uid++,lat:la,lng:ln,name:nm}); }
-  if(crews) $('crews').value = crews;   // crews sized proportionally to job count
+  if(crews) $('crews').value = crews;
+  state.groups = groups || null;   // territory lock for branch presets
   renderPoints(); drawMarkers(); fitMap();
+  optimize();                      // run immediately so the preset shows its result
 }
-$('loadOld').onclick=()=>loadPreset(OLD_BASE, OLD_BRANCH_JOBS, 32);
-$('loadNew').onclick=()=>loadPreset(NEW_BASE, NEW_BRANCH_JOBS, 18);
-$('example').onclick=()=>loadPreset(OLD_BASE, [...OLD_BRANCH_JOBS, ...NEW_BRANCH_JOBS], 50);
+$('loadOld').onclick=()=>loadPreset(OLD_BASE, OLD_BRANCH_JOBS, 32, [{start:0,count:OLD_BRANCH_JOBS.length,crews:32}]);
+$('loadNew').onclick=()=>loadPreset(NEW_BASE, NEW_BRANCH_JOBS, 18, [{start:0,count:NEW_BRANCH_JOBS.length,crews:18}]);
+$('example').onclick=()=>loadPreset(OLD_BASE, [...OLD_BRANCH_JOBS, ...NEW_BRANCH_JOBS], 50,
+  [{start:0,count:OLD_BRANCH_JOBS.length,crews:32}, {start:OLD_BRANCH_JOBS.length,count:NEW_BRANCH_JOBS.length,crews:18}]);
 
 // ---- Connection test ----
 async function testConnection(){
